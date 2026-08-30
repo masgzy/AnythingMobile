@@ -15,7 +15,7 @@ import (
 // v0.2 增量扫描改造：
 //   - byPath 提供路径到文档的 O(1) 映射（原实现为 O(N) 全表扫描，
 //     全量索引十万文件时退化为 O(N^2)，是实测性能瓶颈）；
-//   - LookupPath / RemovePath / RemoveExcept 支撑"进入应用自动增量重扫"。
+//   - lookupPath / RemovePath / RemoveExcept 支撑"进入应用自动增量重扫"。
 type NameIndex struct {
 	mu    sync.RWMutex
 	kind  string // "file" | "folder"，写入搜索结果的 Kind 字段
@@ -81,8 +81,9 @@ func (n *NameIndex) Count() int64 {
 	return int64(len(n.docs))
 }
 
-// LookupPath 返回已索引条目的大小与修改时间（增量扫描的变更检测依据）。
-func (n *NameIndex) LookupPath(path string) (size, mtime int64, ok bool) {
+// lookupPath 返回已索引条目的大小与修改时间（增量扫描的变更检测依据）。
+// 非导出：gobind 禁止多返回值签名，且该方法仅供包内增量扫描使用。
+func (n *NameIndex) lookupPath(path string) (size, mtime int64, ok bool) {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	id, ok := n.byPath[path]

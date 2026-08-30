@@ -181,7 +181,7 @@ func (e *Engine) handleFile(path string, info fs.FileInfo, incremental bool) {
         mtime := info.ModTime().UnixMilli()
 
         if incremental {
-                if oldSize, oldMtime, ok := e.names.LookupPath(path); ok {
+                if oldSize, oldMtime, ok := e.names.lookupPath(path); ok {
                         if oldSize == size && oldMtime == mtime {
                                 return // 未变化：跳过索引与文档解析
                         }

@@ -60,11 +60,11 @@ func TestNameIndexIncrementalAPI(t *testing.T) {
         idx.Add("/sdcard/c.txt", 3, 3)
 
         // LookupPath 命中
-        size, mtime, ok := idx.LookupPath("/sdcard/a.txt")
+        size, mtime, ok := idx.lookupPath("/sdcard/a.txt")
         if !ok || size != 1 || mtime != 1 {
                 t.Fatalf("LookupPath 失败: %d %d %v", size, mtime, ok)
         }
-        if _, _, ok := idx.LookupPath("/sdcard/missing"); ok {
+        if _, _, ok := idx.lookupPath("/sdcard/missing"); ok {
                 t.Fatal("不存在的路径不应命中")
         }
 
