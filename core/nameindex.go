@@ -8,14 +8,19 @@ import (
 	"unicode/utf8"
 )
 
-// NameIndex 基于 2-gram 倒排的文件名索引：
+// NameIndex 基于 2-gram 倒排的名称索引（文件与目录通用，由 kind 区分）：
 //   - 查询词 >= 2 字符：先取各 bigram 倒排表求交集，再对候选做子串验证；
-//   - 单字符查询：退化为全量线性扫描（文件名基数通常在万级，可接受）。
+//   - 单字符查询：退化为全量线性扫描（名称基数通常在十万级，可接受）。
 //
-// 后续里程碑可平滑升级为持久化 n-gram（M3）。
+// v0.2 增量扫描改造：
+//   - byPath 提供路径到文档的 O(1) 映射（原实现为 O(N) 全表扫描，
+//     全量索引十万文件时退化为 O(N^2)，是实测性能瓶颈）；
+//   - LookupPath / RemovePath / RemoveExcept 支撑"进入应用自动增量重扫"。
 type NameIndex struct {
 	mu    sync.RWMutex
+	kind  string // "file" | "folder"，写入搜索结果的 Kind 字段
 	docs  map[uint32]*docInfo
+	byPath map[string]uint32
 	grams map[string]map[uint32]struct{}
 	next  uint32
 }
@@ -28,15 +33,17 @@ type docInfo struct {
 	mtime int64
 }
 
-// NewNameIndex 创建空的文件名索引。
-func NewNameIndex() *NameIndex {
+// NewNameIndex 创建空的名称索引；kind 取 "file" 或 "folder"。
+func NewNameIndex(kind string) *NameIndex {
 	return &NameIndex{
-		docs:  make(map[uint32]*docInfo),
-		grams: make(map[string]map[uint32]struct{}),
+		kind:   kind,
+		docs:   make(map[uint32]*docInfo),
+		byPath: make(map[string]uint32),
+		grams:  make(map[string]map[uint32]struct{}),
 	}
 }
 
-// Add 将一个文件加入索引；同名路径重复加入会先移除旧记录（支持增量重扫）。
+// Add 将一个名称加入索引；同路径重复加入会先移除旧记录（支持增量重扫）。
 func (n *NameIndex) Add(path string, size, mtime int64) {
 	base := filepath.Base(path)
 	lower := strings.ToLower(base)
@@ -47,15 +54,16 @@ func (n *NameIndex) Add(path string, size, mtime int64) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	// 去重：同一路径先删旧 gram 记录
-	if old, ok := n.findByPathLocked(path); ok {
-		n.removeLocked(old)
+	// 去重：同一路径先删旧 gram 记录（O(1) 定位）
+	if id, ok := n.byPath[path]; ok {
+		n.removeLocked(id)
 	}
 
 	id := n.next
 	n.next++
 	doc := &docInfo{path: path, name: base, lower: lower, size: size, mtime: mtime}
 	n.docs[id] = doc
+	n.byPath[path] = id
 	for _, g := range bigrams(lower) {
 		set := n.grams[g]
 		if set == nil {
@@ -66,14 +74,64 @@ func (n *NameIndex) Add(path string, size, mtime int64) {
 	}
 }
 
-// Count 返回已索引文件数。
+// Count 返回已索引条目数。
 func (n *NameIndex) Count() int64 {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return int64(len(n.docs))
 }
 
-// Search 按子串查询文件名，结果按"名字更短优先、修改时间更新优先"排序。
+// LookupPath 返回已索引条目的大小与修改时间（增量扫描的变更检测依据）。
+func (n *NameIndex) LookupPath(path string) (size, mtime int64, ok bool) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	id, ok := n.byPath[path]
+	if !ok {
+		return 0, 0, false
+	}
+	d := n.docs[id]
+	return d.size, d.mtime, true
+}
+
+// RemovePath 从索引移除一个路径；返回是否存在。
+func (n *NameIndex) RemovePath(path string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	id, ok := n.byPath[path]
+	if !ok {
+		return false
+	}
+	n.removeLocked(id)
+	return true
+}
+
+// RemoveExcept 仅保留 seen 中的路径，其余全部移除（增量扫描的删除检测）。
+// 返回被移除的路径列表（供上层联动清理全文库）。
+func (n *NameIndex) RemoveExcept(seen map[string]struct{}) []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	var removed []string
+	for id, d := range n.docs {
+		if _, keep := seen[d.path]; keep {
+			continue
+		}
+		removed = append(removed, d.path)
+		n.removeLocked(id)
+	}
+	return removed
+}
+
+// Reset 清空索引（"重建索引"入口）。
+func (n *NameIndex) Reset() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.docs = make(map[uint32]*docInfo)
+	n.byPath = make(map[string]uint32)
+	n.grams = make(map[string]map[uint32]struct{})
+	n.next = 0
+}
+
+// Search 按子串查询名称，结果按"名称更短优先、修改时间更新优先"排序。
 func (n *NameIndex) Search(q string, limit int) []FileHit {
 	ql := strings.ToLower(strings.TrimSpace(q))
 	if ql == "" || limit <= 0 {
@@ -120,7 +178,8 @@ func (n *NameIndex) Search(q string, limit int) []FileHit {
 		if strings.Contains(doc.lower, ql) {
 			hits = append(hits, FileHit{
 				Path: doc.path, Name: doc.name,
-				Size: doc.size, ModTime: doc.mtime, Matched: "name",
+				Size: doc.size, ModTime: doc.mtime,
+				Matched: "name", Kind: n.kind,
 			})
 		}
 	}
@@ -137,32 +196,22 @@ func (n *NameIndex) Search(q string, limit int) []FileHit {
 	return hits
 }
 
-// ---- 内部工具 ----
-
-func (n *NameIndex) findByPathLocked(path string) (*docInfo, bool) {
-	for _, doc := range n.docs {
-		if doc.path == path {
-			return doc, true
-		}
+// removeLocked 删除指定 id 的文档及其全部倒排记录。调用方需持有写锁。
+func (n *NameIndex) removeLocked(id uint32) {
+	doc, ok := n.docs[id]
+	if !ok {
+		return
 	}
-	return nil, false
-}
-
-func (n *NameIndex) removeLocked(doc *docInfo) {
-	for id, d := range n.docs {
-		if d == doc {
-			for _, g := range bigrams(doc.lower) {
-				if set := n.grams[g]; set != nil {
-					delete(set, id)
-					if len(set) == 0 {
-						delete(n.grams, g)
-					}
-				}
+	for _, g := range bigrams(doc.lower) {
+		if set := n.grams[g]; set != nil {
+			delete(set, id)
+			if len(set) == 0 {
+				delete(n.grams, g)
 			}
-			delete(n.docs, id)
-			return
 		}
 	}
+	delete(n.docs, id)
+	delete(n.byPath, doc.path)
 }
 
 // bigrams 生成 UTF-8 字符级 2-gram；单字符返回其自身，保证单字也能倒排。

@@ -121,18 +121,124 @@ func TestEngineScanAndSearch(t *testing.T) {
 func TestEngineDoubleScanRejected(t *testing.T) {
         dir := t.TempDir()
         e, _ := NewEngine(2)
-        roots, _ := json.Marshal([]string{dir})
-        if err := e.StartScan(string(roots)); err != nil {
+        opt, _ := json.Marshal(ScanOptions{Roots: []string{dir}, Mode: "incremental"})
+        if err := e.StartScan(string(opt)); err != nil {
                 t.Fatal(err)
         }
-        if err := e.StartScan(string(roots)); err == nil {
+        if err := e.StartScan(string(opt)); err == nil {
                 t.Fatal("重复扫描应返回错误")
         }
         e.CancelScan()
         // 等待结束
         time.Sleep(200 * time.Millisecond)
-        if err := e.StartScan(string(roots)); err != nil {
+        if err := e.StartScan(string(opt)); err != nil {
                 t.Fatalf("取消后应可重新扫描: %v", err)
         }
         e.CancelScan()
+}
+
+// TestEngineIncrementalScan 验证"进入应用自动增量重扫"：
+// 新增文件被加入、未变化文件跳过解析、删除文件被移出索引。
+func TestEngineIncrementalScan(t *testing.T) {
+        dir := t.TempDir()
+        f1 := filepath.Join(dir, "alpha.txt")
+        if err := os.WriteFile(f1, []byte("hello"), 0o644); err != nil {
+                t.Fatal(err)
+        }
+        sub := filepath.Join(dir, "子目录")
+        if err := os.MkdirAll(sub, 0o755); err != nil {
+                t.Fatal(err)
+        }
+
+        e, _ := NewEngine(2)
+        c := newCollector()
+        e.SetListener(c)
+
+        start := func() {
+                opt, _ := json.Marshal(ScanOptions{Roots: []string{dir}, Mode: "incremental"})
+                if err := e.StartScan(string(opt)); err != nil {
+                        t.Fatalf("StartScan: %v", err)
+                }
+        }
+        waitStats := func(t *testing.T) Stats {
+                select {
+                case s := <-c.finished:
+                        var st Stats
+                        if err := json.Unmarshal([]byte(s), &st); err != nil {
+                                t.Fatalf("stats 非法: %v", err)
+                        }
+                        return st
+                case <-time.After(10 * time.Second):
+                        t.Fatal("扫描超时")
+                        return Stats{}
+                }
+        }
+
+        // 第一次：首次建索引（1 文件 + 1 目录）
+        start()
+        st := waitStats(t)
+        if !st.FirstBuild || st.Files != 1 || st.Added != 1 {
+                t.Fatalf("首次扫描异常: %+v", st)
+        }
+
+        // 第二次：无任何变动 => added/updated/removed 全 0
+        start()
+        st = waitStats(t)
+        if st.Added != 0 || st.Updated != 0 || st.Removed != 0 {
+                t.Fatalf("无变动扫描不应有增删改: %+v", st)
+        }
+
+        // 第三次：新增文件 + 修改 f1 => added=1 updated=1
+        f2 := filepath.Join(dir, "beta.txt")
+        if err := os.WriteFile(f2, []byte("world"), 0o644); err != nil {
+                t.Fatal(err)
+        }
+        if err := os.WriteFile(f1, []byte("hello!!"), 0o644); err != nil {
+                t.Fatal(err)
+        }
+        // 确保 mtime 变化（部分文件系统时间戳精度为秒）
+        future := time.Now().Add(2 * time.Second)
+        os.Chtimes(f1, future, future)
+
+        start()
+        st = waitStats(t)
+        if st.Added != 1 || st.Updated != 1 || st.Files != 2 {
+                t.Fatalf("增量扫描统计异常: %+v", st)
+        }
+
+        // 删除 f2 => removed=1
+        os.Remove(f2)
+        start()
+        st = waitStats(t)
+        if st.Removed != 1 {
+                t.Fatalf("删除检测失败: %+v", st)
+        }
+        if resp, err := e.Search("beta", 10); err != nil || resp == "" {
+                t.Fatalf("搜索失败: %v", err)
+        } else {
+                sr := SearchResponse{}
+                json.Unmarshal([]byte(resp), &sr)
+                if sr.Total != 0 {
+                        t.Fatalf("已删除文件不应命中: %+v", sr)
+                }
+        }
+
+        // 目录名可搜索
+        sr := searchOnce(t, e, "子目录")
+        if sr.Total < 1 || sr.Hits[0].Kind != "folder" {
+                t.Fatalf("目录名搜索失败: %+v", sr)
+        }
+}
+
+func searchOnce(t *testing.T, e *Engine, q string) SearchResponse {
+        t.Helper()
+        resp, err := e.Search(q, 10)
+        if err != nil {
+                t.Fatalf("Search(%q): %v", q, err)
+        }
+        var sr SearchResponse
+        if err := json.Unmarshal([]byte(resp), &sr); err != nil {
+                t.Fatalf("响应非法: %v", err)
+        }
+        return sr
 }

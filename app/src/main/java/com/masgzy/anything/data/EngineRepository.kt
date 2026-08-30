@@ -17,39 +17,58 @@ data class UiHit(
     val name: String,
     val size: Long,
     val mtime: Long,
-    val matched: String,
+    val matched: String, // "name" | "content"
+    val kind: String,    // "file" | "folder"
     val snippet: String,
-)
+) {
+    val isFolder: Boolean get() = kind == "folder"
+}
+
+/** 索引/扫描阶段。 */
+enum class ScanPhase { IDLE, FIRST_BUILD, UPDATING }
 
 /** 界面状态。 */
 data class EngineUiState(
     val ready: Boolean = false,
     /** Go 引擎初始化失败的原因；null 表示引擎正常。引擎不可用时界面进入降级模式。 */
     val initError: String? = null,
-    val scanning: Boolean = false,
-    val progress: Long = 0,
-    val statusText: String = "就绪",
+    val phase: ScanPhase = ScanPhase.IDLE,
+    /** 本次已扫描文件数（进度提示用）。 */
+    val scanned: Long = 0,
     val query: String = "",
+    /** 引擎返回的全部命中（文件名/目录/全文三类混合），UI 按 Tab 拆分展示。 */
     val hits: List<UiHit> = listOf(),
+    val elapsedMs: Long = 0,
+    /** 最近一次扫描摘要（用于"索引更新完成"提示）。 */
+    val lastSummary: ScanSummary? = null,
+    val statusText: String = "就绪",
 )
+
+/** 一次扫描/索引更新的结果摘要。 */
+data class ScanSummary(
+    val files: Long,
+    val added: Long,
+    val updated: Long,
+    val removed: Long,
+    val durationMs: Long,
+    val cancelled: Boolean,
+    val firstBuild: Boolean,
+) {
+    /** 是否发生了实际变化（决定"索引更新完成"提示是否带变化数）。 */
+    val changed: Boolean get() = added > 0 || updated > 0 || removed > 0
+}
 
 /**
  * Go 核心引擎的 Kotlin 封装。
  *
  * 鲁棒性设计：
  *  - 引擎构造失败（如个别设备 .so 加载异常）不会抛出崩溃，
- *    而是进入降级模式：界面可见 initError 提示，所有引擎调用安全跳过。
+ *    而是进入降级模式：界面可见 initError 提示，所有引擎调用安全跳过；
  *  - 所有跨语言调用均 runCatching 包裹，JSON 解析失败不影响 UI 状态。
  *
- * 命名说明：gobind 依据官方文档把 Go 方法映射为 lowerCamelCase，
- * 并把 NewT(...) 形式的函数转换为构造器：
- *   NewEngine(0)        -> Engine(0)（Go 侧返回 error 时抛异常）
- *   StartScan(json)     -> startScan(json)
- *   Search(q, limit)    -> search(q, limit)
- *   CancelScan()        -> cancelScan()
- *   IsScanning()        -> isScanning()
- *   AddDocumentText(..) -> addDocumentText(..)
- *   Stats()             -> stats()
+ * 引擎 API（gobind lowerCamelCase 映射）：
+ *   Engine(workers) / setListener / startScan(optionsJson) /
+ *   search(q, limit) / removePaths(pathsJson) / cancelScan / isScanning / stats
  */
 class EngineRepository(context: Context) {
 
@@ -76,21 +95,31 @@ class EngineRepository(context: Context) {
         engine?.setListener(object : ProgressListener {
             override fun onProgress(phase: String?, done: Long) {
                 _state.value = _state.value.copy(
-                    progress = done,
-                    statusText = if (phase == "scan") "正在扫描索引… $done" else "正在处理… $done",
+                    scanned = done,
+                    statusText = "更新索引中… 已扫描 $done 项",
                 )
             }
 
             override fun onFinished(statsJSON: String?) {
-                val stats = runCatching { JSONObject(statsJSON ?: "{}") }.getOrNull()
-                val files = stats?.optLong("files") ?: 0
-                val cancelled = stats?.optBoolean("cancelled") ?: false
-                val duration = stats?.optLong("duration_ms") ?: 0
+                val o = runCatching { JSONObject(statsJSON ?: "{}") }.getOrNull()
+                val summary = ScanSummary(
+                    files = o?.optLong("files") ?: 0,
+                    added = o?.optLong("added") ?: 0,
+                    updated = o?.optLong("updated") ?: 0,
+                    removed = o?.optLong("removed") ?: 0,
+                    durationMs = o?.optLong("duration_ms") ?: 0,
+                    cancelled = o?.optBoolean("cancelled") ?: false,
+                    firstBuild = o?.optBoolean("first_build") ?: false,
+                )
                 _state.value = _state.value.copy(
-                    scanning = false,
+                    phase = ScanPhase.IDLE,
+                    lastSummary = summary,
                     statusText = when {
-                        cancelled -> "已取消，已索引 $files 个文件"
-                        else -> "索引完成，共 $files 个文件（${formatDuration(duration)}）"
+                        summary.cancelled -> "已取消，已索引 ${summary.files} 项"
+                        summary.firstBuild -> "首次索引创建完成，共 ${summary.files} 项"
+                        summary.changed ->
+                            "索引更新完成：新增 ${summary.added}，更新 ${summary.updated}，移除 ${summary.removed}"
+                        else -> "索引已是最新（${summary.files} 项）"
                     },
                 )
             }
@@ -103,19 +132,38 @@ class EngineRepository(context: Context) {
         })
     }
 
-    fun startScan(roots: Array<String>) {
+    val hasEngine: Boolean get() = engine != null
+
+    /**
+     * 启动索引更新。
+     * @param incremental true=增量（只处理变动，进入应用自动触发）；
+     *                    false=全量重建（设置页"重建索引"）。
+     */
+    fun startScan(roots: Array<String>, incremental: Boolean) {
         val eng = engine ?: return
-        if (_state.value.scanning) return
-        val rootsJson = JSONArray(roots.toList()).toString()
-        _state.value = _state.value.copy(scanning = true, progress = 0, statusText = "开始扫描…")
-        runCatching { eng.startScan(rootsJson) }
+        if (_state.value.phase != ScanPhase.IDLE) return
+        val opt = JSONObject().apply {
+            put("roots", JSONArray(roots.toList()))
+            put("mode", if (incremental) "incremental" else "full")
+        }
+        val first = incremental && isIndexEmpty()
+        _state.value = _state.value.copy(
+            phase = if (first) ScanPhase.FIRST_BUILD else ScanPhase.UPDATING,
+            scanned = 0,
+            statusText = if (first) "首次使用，正在为您建立文件索引…" else "更新索引中…",
+        )
+        runCatching { eng.startScan(opt.toString()) }
             .onFailure {
                 _state.value = _state.value.copy(
-                    scanning = false,
-                    statusText = "扫描启动失败: ${it.message}"
+                    phase = ScanPhase.IDLE,
+                    statusText = "扫描启动失败: ${it.message}",
                 )
             }
     }
+
+    private fun isIndexEmpty(): Boolean = runCatching {
+        JSONObject(engine?.stats() ?: "{}").optLong("files", 1) == 0L
+    }.getOrDefault(false)
 
     fun cancelScan() {
         val eng = engine ?: return
@@ -123,21 +171,19 @@ class EngineRepository(context: Context) {
         _state.value = _state.value.copy(statusText = "已请求取消…")
     }
 
+    /** 搜索三类命中（文件名/目录名/全文），合并返回。 */
     fun search(query: String) {
         val eng = engine
-        if (query.isBlank()) {
+        if (query.isBlank() || eng == null) {
             _state.value = _state.value.copy(query = query, hits = emptyList())
             return
         }
-        if (eng == null) {
-            _state.value = _state.value.copy(query = query, hits = emptyList())
-            return
-        }
-        val respJson = runCatching { eng.search(query, 100) }
-        respJson.onSuccess { json ->
+        runCatching { eng.search(query, 300) }.onSuccess { json ->
             val hits = mutableListOf<UiHit>()
+            var elapsed = 0L
             runCatching {
                 val obj = JSONObject(json)
+                elapsed = obj.optLong("elapsed_ms")
                 val arr = obj.optJSONArray("hits") ?: JSONArray()
                 for (i in 0 until arr.length()) {
                     val h = arr.getJSONObject(i)
@@ -147,35 +193,36 @@ class EngineRepository(context: Context) {
                             name = h.optString("name"),
                             size = h.optLong("size"),
                             mtime = h.optLong("mtime"),
-                            matched = h.optString("matched"),
+                            matched = h.optString("matched", "name"),
+                            kind = h.optString("kind", "file"),
                             snippet = h.optString("snippet"),
                         )
                     )
                 }
             }
-            val elapsed = runCatching {
-                JSONObject(json).optLong("elapsed_ms")
-            }.getOrDefault(0)
-            _state.value = _state.value.copy(query = query, hits = hits)
-            if (hits.isEmpty()) {
-                _state.value = _state.value.copy(statusText = "无结果")
-            } else {
-                _state.value = _state.value.copy(
-                    statusText = "命中 ${hits.size} 条 · $elapsed ms"
-                )
-            }
+            _state.value = _state.value.copy(
+                query = query, hits = hits, elapsedMs = elapsed,
+                statusText = if (hits.isEmpty()) "无结果" else "命中 ${hits.size} 项 · $elapsed ms",
+            )
         }.onFailure {
             _state.value = _state.value.copy(query = query, hits = emptyList())
         }
+    }
+
+    /** 删除文件后同步移出索引；返回成功删除的个数。 */
+    fun removePaths(paths: List<String>): Int {
+        val eng = engine ?: return 0
+        if (paths.isEmpty()) return 0
+        val json = JSONArray(paths).toString()
+        val resp = runCatching { eng.removePaths(json) }.getOrNull() ?: return 0
+        return runCatching { JSONObject(resp).optInt("removed", 0) }.getOrDefault(0)
     }
 
     /** 用系统查看器打开命中的文件。 */
     fun openFile(path: String): Boolean = runCatching {
         val file = File(path)
         if (!file.exists()) return false
-        val uri = FileProvider.getUriForFile(
-            appContext, "${appContext.packageName}.fileprovider", file
-        )
+        val uri = fileUri(file)
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, mimeOf(path))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -183,6 +230,25 @@ class EngineRepository(context: Context) {
         appContext.startActivity(intent)
         true
     }.getOrDefault(false)
+
+    /** 分享文件（详情页"发送"）。 */
+    fun shareFile(path: String): Boolean = runCatching {
+        val file = File(path)
+        if (!file.exists()) return false
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = mimeOf(path)
+            putExtra(Intent.EXTRA_STREAM, fileUri(file))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        appContext.startActivity(Intent.createChooser(intent, "发送").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+        true
+    }.getOrDefault(false)
+
+    private fun fileUri(file: File) = FileProvider.getUriForFile(
+        appContext, "${appContext.packageName}.fileprovider", file
+    )
 
     private fun mimeOf(path: String): String = when (path.substringAfterLast('.', "").lowercase()) {
         "pdf" -> "application/pdf"
@@ -194,11 +260,5 @@ class EngineRepository(context: Context) {
         "ppt" -> "application/vnd.ms-powerpoint"
         "txt" -> "text/plain"
         else -> "*/*"
-    }
-
-    private fun formatDuration(ms: Long): String = when {
-        ms >= 60_000 -> "${ms / 60_000} 分 ${(ms % 60_000) / 1000} 秒"
-        ms >= 1_000 -> "${ms / 1000.0} 秒"
-        else -> "$ms ms"
     }
 }

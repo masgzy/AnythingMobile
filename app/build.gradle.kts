@@ -14,8 +14,8 @@ android {
         applicationId = "com.masgzy.anything"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0-alpha1"
+        versionCode = 2
+        versionName = "1.0.0-alpha2"
     }
 
     // 按 ABI 拆分产物：三种单架构 APK + 一个 universal 通吃包。
@@ -71,6 +71,9 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui-tooling-preview")
+    // 扩展图标集：筛选按钮（AllInclusive/VideoLibrary/MusicNote 等）需要；
+    // release 构建经 R8 裁剪后仅保留实际引用的图标。
+    implementation("androidx.compose.material:material-icons-extended")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("androidx.activity:activity-compose:1.9.2")
