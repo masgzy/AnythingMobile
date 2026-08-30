@@ -51,14 +51,18 @@ command -v gomobile >/dev/null 2>&1 || {
 gomobile init 2>/dev/null || true
 
 # ---- 编译 AAR（含 16KB 页对齐链接参数） ----
+# 注意：bind 必须在 Go 模块目录（core/）内执行
 mkdir -p app/libs
-gomobile bind \
-  -target=android \
-  -androidapi 24 \
-  -javapkg=com.masgzy.anything \
-  -ldflags='-extldflags=-Wl,-z,max-page-size=16384' \
-  -o app/libs/engine.aar \
-  ./core
+(
+  cd core
+  gomobile bind \
+    -target=android \
+    -androidapi 24 \
+    -javapkg=com.masgzy.anything \
+    -ldflags='-extldflags=-Wl,-z,max-page-size=16384' \
+    -o ../app/libs/engine.aar \
+    .
+)
 
 echo
 echo "✅ 生成完成: app/libs/engine.aar"
