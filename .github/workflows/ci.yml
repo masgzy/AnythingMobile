@@ -1,0 +1,53 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: 引擎测试 + AAR + APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Go 1.23
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Go 引擎测试（go vet + go test）
+        run: |
+          cd core
+          go vet ./...
+          go test ./... -v
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 构建 Go 引擎 AAR（含 16KB 页对齐）
+        run: |
+          chmod +x build-aar.sh
+          ./build-aar.sh
+
+      - name: 生成 Gradle Wrapper 并构建 APK
+        run: |
+          gradle wrapper --gradle-version 8.9
+          ./gradlew :app:assembleDebug --no-daemon
+
+      - name: 上传 APK 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnythingMobile-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+
+      - name: 上传 AAR 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-aar
+          path: app/libs/engine.aar

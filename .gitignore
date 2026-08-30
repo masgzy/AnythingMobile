@@ -1,0 +1,21 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Android Studio / IDEA
+.idea/
+*.iml
+captures/
+local.properties
+
+# 构建产物（AAR 由 build-aar.sh / CI 生成，不入库）
+app/libs/*.aar
+
+# Go
+core/engine
+*.test
+core/coverage.out
+
+# 系统
+.DS_Store
