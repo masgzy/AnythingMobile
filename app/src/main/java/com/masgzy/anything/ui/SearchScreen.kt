@@ -48,10 +48,12 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.tabRowIndicatorOffset
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -211,7 +213,16 @@ fun SearchScreen(
                         selectedTabIndex = pagerState.currentPage,
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
-                        indicatorColor = MaterialTheme.colorScheme.onPrimary,
+                        indicator = { tabPositions ->
+                            if (pagerState.currentPage < tabPositions.size) {
+                                TabRowDefaults.PrimaryIndicator(
+                                    modifier = Modifier.tabRowIndicatorOffset(
+                                        tabPositions[pagerState.currentPage]
+                                    ),
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                )
+                            }
+                        },
                     ) {
                         listOf("文件名", "office 文档正文", "目录名").forEachIndexed { i, title ->
                             Tab(

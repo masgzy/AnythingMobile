@@ -70,7 +70,7 @@ private fun seedScheme(seed: Color, dark: Boolean, amoled: Boolean) =
         val (h, s, l) = hslOf(argb)
 
         fun sl(light: Float, sat: Float = s): Color =
-            Color.fromHsl(h, sat.coerceIn(0f, 1f), light.coerceIn(0f, 1f))
+            colorFromHsl(h, sat.coerceIn(0f, 1f), light.coerceIn(0f, 1f))
 
         val scheme = if (dark) {
             darkColorScheme(
@@ -145,7 +145,7 @@ private fun hslOf(argb: Int): Triple<Float, Float, Float> {
     return Triple(h, s, l)
 }
 
-private fun Color.fromHsl(h: Float, s: Float, l: Float): Color {
+private fun colorFromHsl(h: Float, s: Float, l: Float): Color {
     val c = (1f - kotlin.math.abs(2f * l - 1f)) * s
     val x = c * (1f - kotlin.math.abs((h / 60f) % 2f - 1f))
     val m = l - c / 2f

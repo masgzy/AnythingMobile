@@ -19,7 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Brightness6
-import androidx.compose.material.icons.filled.ColorPalette
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Sync
@@ -119,7 +119,7 @@ fun SettingsScreen(
                 // 动态取色（Monet）：仅 Android 12+ 有效
                 if (monetAvailable) {
                     SwitchSetting(
-                        icon = Icons.Filled.ColorPalette,
+                        icon = Icons.Filled.Palette,
                         title = "动态取色",
                         subtitle = "跟随系统壁纸配色（Material You）",
                         checked = settings.dynamicColor,
