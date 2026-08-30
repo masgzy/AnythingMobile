@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 刻意不声明 INTERNET 权限：纯离线是本应用的核心承诺。
+         gomobile 生成的 AAR manifest 亦不含任何权限（见 x/mobile bind_androidapp.go）。 -->
     <!-- Android 12 及以下访问共享存储 -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"

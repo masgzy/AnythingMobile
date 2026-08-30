@@ -1,3 +1,5 @@
+import com.android.build.gradle.internal.api.BaseVariantOutputImpl
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -13,7 +15,29 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0-alpha1"
+    }
+
+    // 按 ABI 拆分产物：三种单架构 APK + 一个 universal 通吃包。
+    // 注意：universal 会包含 AAR 中全部 .so（arm64-v8a/armeabi-v7a/x86/x86_64）。
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = true
+        }
+    }
+
+    // 统一产物命名: AnythingMobile-<版本>-<abi|universal>.apk
+    // （配合 CI 的 upload-artifact v7 单文件直传，下载即是可安装的 APK 本体）
+    applicationVariants.all {
+        val vName = versionName
+        outputs.all {
+            val output = this as BaseVariantOutputImpl
+            val abi = output.getFilter("ABI") ?: "universal"
+            output.outputFileName = "AnythingMobile-$vName-$abi.apk"
+        }
     }
 
     buildTypes {

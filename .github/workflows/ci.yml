@@ -6,15 +6,27 @@ on:
   pull_request:
   workflow_dispatch:
 
+# 同一分支新推送自动取消未完成的旧任务，节省构建资源
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   build:
-    name: 引擎测试 + AAR + APK
+    name: 引擎测试 + AAR + 多ABI APK
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      # 四个官方 action 均已升级到 Node.js 24 原生运行时版本，
+      # 消除 "Node.js 20 is deprecated" 警告：
+      #   checkout v7 / setup-go v7 / setup-java v6 / upload-artifact v7
+      - uses: actions/checkout@v7
 
       - name: 安装 Go 1.23
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: '1.23'
 
@@ -25,7 +37,7 @@ jobs:
           go test ./... -v
 
       - name: 安装 JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
@@ -35,19 +47,47 @@ jobs:
           chmod +x build-aar.sh
           ./build-aar.sh
 
-      - name: 生成 Gradle Wrapper 并构建 APK
+      - name: 生成 Gradle Wrapper 并构建 APK（多 ABI + universal）
         run: |
           gradle wrapper --gradle-version 8.9
           ./gradlew :app:assembleDebug --no-daemon
 
-      - name: 上传 APK 产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: AnythingMobile-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+      - name: 产物清单
+        run: |
+          ls -lh app/build/outputs/apk/debug/
+          VERSION=$(sed -n 's/.*versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -1)
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          cp app/libs/engine.aar "app/libs/AnythingMobile-engine-$VERSION.aar"
 
-      - name: 上传 AAR 产物
-        uses: actions/upload-artifact@v4
+      # upload-artifact v7 新能力：单文件直传（archive: false）。
+      # 不打 zip 包，artifact 名 = 文件名，下载即得可安装的 APK 本体。
+      # 注意：该模式要求 path 只能解析到一个文件，因此按 ABI 分步上传。
+      - name: 上传 arm64-v8a APK（直传）
+        uses: actions/upload-artifact@v7
         with:
-          name: engine-aar
-          path: app/libs/engine.aar
+          archive: false
+          path: app/build/outputs/apk/debug/AnythingMobile-*-arm64-v8a.apk
+
+      - name: 上传 armeabi-v7a APK（直传）
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: app/build/outputs/apk/debug/AnythingMobile-*-armeabi-v7a.apk
+
+      - name: 上传 x86_64 APK（直传）
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: app/build/outputs/apk/debug/AnythingMobile-*-x86_64.apk
+
+      - name: 上传 universal APK（直传）
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: app/build/outputs/apk/debug/AnythingMobile-*-universal.apk
+
+      - name: 上传引擎 AAR（直传）
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: app/libs/AnythingMobile-engine-*.aar

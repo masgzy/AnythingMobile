@@ -15,6 +15,7 @@ package core
 import (
         "encoding/json"
         "errors"
+        "fmt"
         "runtime"
         "strings"
         "sync/atomic"
@@ -118,11 +119,8 @@ func (e *Engine) StartScan(rootsJSON string) error {
         e.cancel.Store(false)
         e.startAt.Store(time.Now().UnixMilli())
 
-        go func() {
-                rootsCopy := make([]string, len(roots))
-                copy(rootsCopy, roots)
-                cancelled := e.traverse(rootsCopy)
-
+        // finishScan 统一收尾：通知统计并复位扫描状态，防止 UI 卡在"扫描中"。
+        finishScan := func(cancelled bool) {
                 st := Stats{
                         Files:       e.files.Load(),
                         DocsFound:   e.docsFound.Load(),
@@ -131,11 +129,26 @@ func (e *Engine) StartScan(rootsJSON string) error {
                         Cancelled:   cancelled,
                         FinishedAt:  time.Now().Format(time.RFC3339),
                 }
-                b, err := json.Marshal(st)
-                if err == nil {
+                if b, err := json.Marshal(st); err == nil {
                         e.notifyFinished(string(b))
                 }
                 e.scanning.Store(false)
+        }
+
+        go func() {
+                // 鲁棒性：扫描在任意存储介质上运行，即使出现未预期异常，
+                // 也必须 recover 并收尾 —— gobind 约束 panic 跨界即进程退出。
+                defer func() {
+                        if r := recover(); r != nil {
+                                e.notifyError("scan", fmt.Sprintf("扫描发生内部错误: %v", r))
+                                finishScan(true)
+                        }
+                }()
+
+                rootsCopy := make([]string, len(roots))
+                copy(rootsCopy, roots)
+                cancelled := e.traverse(rootsCopy)
+                finishScan(cancelled)
         }()
         return nil
 }

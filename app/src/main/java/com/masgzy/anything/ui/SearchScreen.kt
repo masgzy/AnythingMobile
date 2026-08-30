@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -19,7 +20,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,6 +29,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.masgzy.anything.AppViewModel
 import com.masgzy.anything.StoragePermissions
@@ -49,9 +53,17 @@ fun SearchScreen(
     var query by remember { mutableStateOf("") }
     var hasAccess by remember { mutableStateOf(StoragePermissions.hasStorageAccess(context)) }
 
-    // 从系统设置页授权返回后刷新权限状态
-    LaunchedEffect(state.scanning) {
-        hasAccess = StoragePermissions.hasStorageAccess(context)
+    // 从系统设置页授权返回（ON_RESUME）后刷新权限状态。
+    // 鲁棒性：用生命周期观察器替代上次依赖 scanning 变化的巧合刷新。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasAccess = StoragePermissions.hasStorageAccess(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Scaffold { padding ->
@@ -66,6 +78,21 @@ fun SearchScreen(
                 style = MaterialTheme.typography.headlineMedium,
                 modifier = Modifier.padding(vertical = 12.dp),
             )
+
+            // 引擎初始化失败时的降级提示（点击无副作用，扫描按钮同步禁用）
+            state.initError?.let { err ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                    ),
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(err, color = MaterialTheme.colorScheme.onErrorContainer)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
 
             if (!hasAccess) {
                 Card(modifier = Modifier.fillMaxWidth()) {
@@ -102,20 +129,23 @@ fun SearchScreen(
                     OutlinedButton(onClick = { viewModel.cancelScan() }) { Text("取消扫描") }
                     LinearProgressIndicator(
                         progress = {
-                            if (state.progress > 0) (state.progress % 1000) / 1000f else 0.2f
+                            // 引擎每 200 个文件回调一次累计值，这里做归一化展示；
+                            // coerceIn 保证异常值不会传给进度条。
+                            if (state.progress > 0) ((state.progress % 1000) / 1000f)
+                                .coerceIn(0f, 1f) else 0.2f
                         },
                         modifier = Modifier.weight(1f),
                     )
                 } else {
                     Button(
                         onClick = { viewModel.startScan() },
-                        enabled = hasAccess,
+                        enabled = hasAccess && state.ready,
                     ) { Text("开始扫描") }
                 }
             }
 
             Text(
-                text = state.statusText + if (state.hits.isEmpty()) "" else " · 命中 ${state.hits.size}",
+                text = state.statusText,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(vertical = 8.dp),
             )

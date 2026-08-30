@@ -1,0 +1,58 @@
+name: Release
+
+# 推送 v* 标签时自动构建并发布 Release：APK 以单文件附件形式挂载（不打包 zip）。
+# 说明：当前处于 alpha 阶段，尚未发布首个版本；本工作流已就绪，
+# 待维护者确认后执行 git tag v1.0.0-alpha1 && git push origin v1.0.0-alpha1 即触发。
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 构建并发布 APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 安装 Go 1.23
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.23'
+
+      - name: Go 引擎测试（发布前把关）
+        run: |
+          cd core
+          go vet ./...
+          go test ./...
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 构建 Go 引擎 AAR（含 16KB 页对齐）
+        run: |
+          chmod +x build-aar.sh
+          ./build-aar.sh
+
+      - name: 构建 APK（多 ABI + universal）
+        run: |
+          gradle wrapper --gradle-version 8.9
+          ./gradlew :app:assembleDebug --no-daemon
+
+      # alpha 阶段使用 debug 签名（可直接安装体验）；
+      # 正式版将切换 assembleRelease 并配置正式签名。
+      - name: 发布到 GitHub Releases（APK 单文件附件）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          gh release create "$TAG" --title "AnythingMobile $TAG" --generate-notes --prerelease
+          gh release upload "$TAG" app/build/outputs/apk/debug/AnythingMobile-*.apk
