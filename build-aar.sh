@@ -43,11 +43,20 @@ JAVA_HOME_SET="${JAVA_HOME:-}"
   { echo "错误: 需要 JDK 17+ (javac)"; exit 1; }
 
 # ---- 安装 gomobile 并补齐 go.mod indirect 依赖 ----
+# 版本钉死（可复现构建，防上游漂移）：
+#   x/mobile 的 go 指令演进：2025-08-13 起要求 Go>=1.24，
+#   2026-02-11 起要求 Go>=1.25，2026-08-21 起要求 Go>=1.26。
+#   395d808d53cd（2025-08-08，go 指令 1.23.0）是最后一个兼容本项目
+#   基线 Go 1.23 的快照。升级 pin 前必须先核对上游 go 指令仍 <= 1.23：
+#     curl -s https://raw.githubusercontent.com/golang/mobile/<sha>/go.mod
+#   或整体升级项目 Go 基线后再跟进。
+GOMOBILE_PIN=395d808d53cd
+
 command -v gomobile >/dev/null 2>&1 || {
-  echo "安装 gomobile..."
-  go install golang.org/x/mobile/cmd/gomobile@latest
+  echo "安装 gomobile (pin: $GOMOBILE_PIN)..."
+  go install "golang.org/x/mobile/cmd/gomobile@${GOMOBILE_PIN}"
 }
-(cd core && go get -d golang.org/x/mobile/cmd/gomobile@latest)
+(cd core && go get golang.org/x/mobile/cmd/gomobile@"${GOMOBILE_PIN}")
 gomobile init 2>/dev/null || true
 
 # ---- 编译 AAR（含 16KB 页对齐链接参数） ----
