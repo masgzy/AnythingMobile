@@ -56,8 +56,14 @@ command -v gomobile >/dev/null 2>&1 || {
   echo "安装 gomobile (pin: $GOMOBILE_PIN)..."
   go install "golang.org/x/mobile/cmd/gomobile@${GOMOBILE_PIN}"
 }
+# gobind 同样钉死：bind 仅依赖 PATH 中的 gobind（bind.go: exec.LookPath），
+# 无需 gomobile init —— init 内部写死 gobind@latest，在 GOTOOLCHAIN=local
+# 下会拉到要求 Go>=1.26 的上游快照而失败（2026-08-30 CI 故障根因链）。
+command -v gobind >/dev/null 2>&1 || {
+  echo "安装 gobind (pin: $GOMOBILE_PIN)..."
+  go install "golang.org/x/mobile/cmd/gobind@${GOMOBILE_PIN}"
+}
 (cd core && go get golang.org/x/mobile/cmd/gomobile@"${GOMOBILE_PIN}")
-gomobile init 2>/dev/null || true
 
 # ---- 编译 AAR（含 16KB 页对齐链接参数） ----
 # 注意：bind 必须在 Go 模块目录（core/）内执行
