@@ -11,6 +11,9 @@ import kotlinx.coroutines.launch
 /**
  * 搜索界面状态持有者。组合引擎仓库与权限逻辑，
  * Compose 层只与 ViewModel 交互。
+ *
+ * 构造使用 AndroidViewModelFactory.getInstance(application)，
+ * 见 MainActivity。
  */
 class AppViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -27,12 +30,4 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun search(query: String) = repo.search(query)
 
     fun openFile(path: String) = repo.openFile(path)
-
-    companion object {
-        val Factory: ViewModelProvider.Factory = object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                AppViewModel(getApplication(Application())) as T
-        }
-    }
 }
