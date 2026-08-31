@@ -14,9 +14,9 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -95,7 +95,7 @@ private fun WelcomePage(page: Int, onFinish: () -> Unit) {
         when (page) {
             0 -> {
                 Icon(
-                    Icons.Filled.Search,
+                    Icons.Rounded.Search,
                     null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(140.dp),
@@ -107,7 +107,7 @@ private fun WelcomePage(page: Int, onFinish: () -> Unit) {
             }
             1 -> {
                 Icon(
-                    Icons.Filled.Description,
+                    Icons.Rounded.Description,
                     null,
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(140.dp),
@@ -119,7 +119,7 @@ private fun WelcomePage(page: Int, onFinish: () -> Unit) {
             }
             else -> {
                 Icon(
-                    Icons.Filled.CheckCircle,
+                    Icons.Rounded.CheckCircle,
                     null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(140.dp),

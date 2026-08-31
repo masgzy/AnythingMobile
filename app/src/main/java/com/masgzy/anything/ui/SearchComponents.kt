@@ -1,7 +1,12 @@
 package com.masgzy.anything.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -18,19 +23,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AllInclusive
-import androidx.compose.material.icons.filled.Article
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.Slideshow
-import androidx.compose.material.icons.filled.TableChart
-import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material.icons.rounded.AllInclusive
+import androidx.compose.material.icons.rounded.Article
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.InsertDriveFile
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Slideshow
+import androidx.compose.material.icons.rounded.TableChart
+import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -41,7 +46,11 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,21 +60,22 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.masgzy.anything.data.UiHit
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /** 按扩展名判定文件类别（筛选快捷钮使用）。 */
 enum class FileCategory(val label: String, val icon: ImageVector, val exts: Set<String>) {
-    ALL("所有", Icons.Filled.AllInclusive, emptySet()),
-    VIDEO("视频", Icons.Filled.VideoLibrary, setOf("mp4", "avi", "mkv", "mov", "3gp", "flv", "wmv", "webm", "m4v", "ts")),
-    AUDIO("音乐", Icons.Filled.MusicNote, setOf("mp3", "flac", "wav", "aac", "ogg", "m4a", "wma", "ape", "mid")),
-    IMAGE("图片", Icons.Filled.Image, setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "svg")),
-    DOC("文档", Icons.Filled.Edit, setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "wps", "csv", "html", "xml")),
-    WORD("Word", Icons.Filled.Description, setOf("doc", "docx", "wps", "txt", "md", "html")),
-    EXCEL("Excel", Icons.Filled.TableChart, setOf("xls", "xlsx", "csv")),
-    PPT("PPT", Icons.Filled.Slideshow, setOf("ppt", "pptx")),
-    ARTICLE("文章", Icons.Filled.Article, setOf()),
+    ALL("所有", Icons.Rounded.AllInclusive, emptySet()),
+    VIDEO("视频", Icons.Rounded.VideoLibrary, setOf("mp4", "avi", "mkv", "mov", "3gp", "flv", "wmv", "webm", "m4v", "ts")),
+    AUDIO("音乐", Icons.Rounded.MusicNote, setOf("mp3", "flac", "wav", "aac", "ogg", "m4a", "wma", "ape", "mid")),
+    IMAGE("图片", Icons.Rounded.Image, setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "svg")),
+    DOC("文档", Icons.Rounded.Edit, setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "wps", "csv", "html", "xml")),
+    WORD("Word", Icons.Rounded.Description, setOf("doc", "docx", "wps", "txt", "md", "html")),
+    EXCEL("Excel", Icons.Rounded.TableChart, setOf("xls", "xlsx", "csv")),
+    PPT("PPT", Icons.Rounded.Slideshow, setOf("ppt", "pptx")),
+    ARTICLE("文章", Icons.Rounded.Article, setOf()),
 }
 
 val FileCategory.isAll: Boolean get() = this == FileCategory.ALL
@@ -87,16 +97,16 @@ fun categoryOf(path: String): FileCategory {
 
 /** 结果条目主图标。 */
 fun iconFor(hit: UiHit): ImageVector = when {
-    hit.isFolder -> Icons.Filled.Folder
-    hit.matched == "content" -> Icons.Filled.Article
+    hit.isFolder -> Icons.Rounded.Folder
+    hit.matched == "content" -> Icons.Rounded.Article
     else -> when (val c = categoryOf(hit.path)) {
-        FileCategory.VIDEO -> Icons.Filled.VideoLibrary
-        FileCategory.AUDIO -> Icons.Filled.MusicNote
-        FileCategory.IMAGE -> Icons.Filled.Image
-        FileCategory.DOC, FileCategory.WORD -> Icons.Filled.Edit
-        FileCategory.EXCEL -> Icons.Filled.TableChart
-        FileCategory.PPT -> Icons.Filled.Slideshow
-        else -> if (c.exts.isNotEmpty()) Icons.Filled.InsertDriveFile else Icons.Filled.InsertDriveFile
+        FileCategory.VIDEO -> Icons.Rounded.VideoLibrary
+        FileCategory.AUDIO -> Icons.Rounded.MusicNote
+        FileCategory.IMAGE -> Icons.Rounded.Image
+        FileCategory.DOC, FileCategory.WORD -> Icons.Rounded.Edit
+        FileCategory.EXCEL -> Icons.Rounded.TableChart
+        FileCategory.PPT -> Icons.Rounded.Slideshow
+        else -> if (c.exts.isNotEmpty()) Icons.Rounded.InsertDriveFile else Icons.Rounded.InsertDriveFile
     }
 }
 
@@ -241,9 +251,9 @@ fun DetailSheet(
                 Modifier.fillMaxWidth().padding(8.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                SheetAction(Icons.Filled.OpenInNew, if (hit.isFolder) "打开" else "打开路径", onOpen)
-                if (!hit.isFolder) SheetAction(Icons.Filled.Description, "发送", onShare)
-                SheetAction(Icons.Filled.Delete, "删除", onDelete)
+                SheetAction(Icons.Rounded.OpenInNew, if (hit.isFolder) "打开" else "打开路径", onOpen)
+                if (!hit.isFolder) SheetAction(Icons.Rounded.Description, "发送", onShare)
+                SheetAction(Icons.Rounded.Delete, "删除", onDelete)
             }
             Spacer(Modifier.height(24.dp))
         }
@@ -265,10 +275,13 @@ private fun SheetAction(icon: ImageVector, label: String, onClick: () -> Unit) {
 }
 
 /**
- * 底部筛选圆钮（含上方悬浮标签气泡，还原原版样式）。
+ * 底部筛选圆钮（MD3 Rounded 图标 + 点击后浮现的提示气泡）。
  *
- * 注意：label 传 null 时不显示气泡（漏斗钮无标签，同原版）；
- * 选中/未选中颜色经 animateColorAsState 过渡，不再生硬跳变。
+ * 交互还原原版：图标默认裸露，不常驻文字标签；点击后才在按钮上方
+ * 浮现提示气泡，约 1.4 秒后自动淡出 —— 既不遮挡内容，又能确认操作。
+ *
+ * 实现细节：气泡区域用固定高度占位（labelSlot），出现/消失仅做
+ * 淡入缩放动画，按钮位置不跳动；label 传 null 时无气泡（也不占位）。
  */
 @Composable
 fun FilterButton(
@@ -278,6 +291,14 @@ fun FilterButton(
     label: String? = null,
     size: Dp = 48.dp,
 ) {
+    // 点击后短暂显示提示气泡，超时自动淡出
+    var showLabel by remember { mutableStateOf(false) }
+    LaunchedEffect(showLabel) {
+        if (showLabel) {
+            delay(1400)
+            showLabel = false
+        }
+    }
     val containerColor by animateColorAsState(
         targetValue = if (selected) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -292,17 +313,35 @@ fun FilterButton(
     )
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         if (label != null) {
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                shadowElevation = 2.dp,
+            // 固定高度占位：气泡显示与否不影响按钮位置
+            Box(
+                modifier = Modifier.height(labelSlotHeight),
+                contentAlignment = Alignment.BottomCenter,
             ) {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                )
+                AnimatedVisibility(
+                    visible = showLabel,
+                    enter = fadeIn(tween(150)) + scaleIn(
+                        initialScale = 0.6f,
+                        animationSpec = tween(150),
+                    ),
+                    exit = fadeOut(tween(250)) + scaleOut(
+                        targetScale = 0.6f,
+                        animationSpec = tween(250),
+                    ),
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shadowElevation = 2.dp,
+                    ) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                    }
+                }
             }
             Spacer(Modifier.height(6.dp))
         }
@@ -310,7 +349,10 @@ fun FilterButton(
             modifier = Modifier
                 .size(size)
                 .clip(CircleShape)
-                .clickable(onClick = onClick),
+                .clickable {
+                    showLabel = true
+                    onClick()
+                },
             contentAlignment = Alignment.Center,
         ) {
             Surface(
@@ -328,6 +370,9 @@ fun FilterButton(
         }
     }
 }
+
+/** 气泡占位行高度（labelSmall + 上下内边距）。 */
+private val labelSlotHeight = 28.dp
 
 fun formatSize(bytes: Long): String = when {
     bytes >= 1 shl 30 -> "%.1f GB".format(bytes / 1073741824f)

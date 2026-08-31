@@ -1,3 +1,3 @@
 module github.com/masgzy/AnythingMobile/core
 
-go 1.23
+go 1.27

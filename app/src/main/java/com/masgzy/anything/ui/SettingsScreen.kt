@@ -29,22 +29,22 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Brightness6
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Colorize
-import androidx.compose.material.icons.filled.Contrast
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.InvertColors
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.SortByAlpha
-import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.filled.Tonality
-import androidx.compose.material.icons.filled.Wallpaper
-import androidx.compose.material.icons.filled.WbTwilight
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Brightness6
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Colorize
+import androidx.compose.material.icons.rounded.Contrast
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.InvertColors
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.SortByAlpha
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Tonality
+import androidx.compose.material.icons.rounded.Wallpaper
+import androidx.compose.material.icons.rounded.WbTwilight
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -124,7 +124,7 @@ fun SettingsScreen(
                 title = { Text("设置") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -148,7 +148,7 @@ fun SettingsScreen(
             SectionHeader("外观")
 
             PreferenceCard(
-                icon = Icons.Filled.Brightness6,
+                icon = Icons.Rounded.Brightness6,
                 title = "主题模式",
                 subtitle = modeLabel,
                 onClick = { showThemeModeDialog = true },
@@ -156,7 +156,7 @@ fun SettingsScreen(
 
             if (monetAvailable) {
                 PreferenceCard(
-                    icon = Icons.Filled.Wallpaper,
+                    icon = Icons.Rounded.Wallpaper,
                     title = "动态取色",
                     subtitle = "如果启用，应用颜色将更改为壁纸颜色",
                     trailing = {
@@ -171,7 +171,7 @@ fun SettingsScreen(
             }
 
             PreferenceCard(
-                icon = Icons.Filled.Palette,
+                icon = Icons.Rounded.Palette,
                 title = "配色方案",
                 subtitle = paletteSubtitle(settings, monetAvailable),
                 onClick = { showPaletteSheet = true },
@@ -192,7 +192,7 @@ fun SettingsScreen(
             )
 
             PreferenceCard(
-                icon = Icons.Filled.Tonality,
+                icon = Icons.Rounded.Tonality,
                 title = "Amoled模式",
                 subtitle = "如果启用，在夜间模式下背景色将设为纯黑",
                 trailing = {
@@ -209,7 +209,7 @@ fun SettingsScreen(
             SectionHeader("索引")
 
             PreferenceCard(
-                icon = Icons.Filled.Sync,
+                icon = Icons.Rounded.Sync,
                 title = "进入应用时自动更新索引",
                 subtitle = "增量扫描，仅处理有变动的文件",
                 trailing = {
@@ -223,7 +223,7 @@ fun SettingsScreen(
             )
 
             PreferenceCard(
-                icon = Icons.Filled.Sync,
+                icon = Icons.Rounded.Sync,
                 title = "立即更新索引",
                 subtitle = if (scanning) repoState.statusText else "增量检查文件变动",
                 enabled = !scanning && repoState.ready,
@@ -231,7 +231,7 @@ fun SettingsScreen(
             )
 
             PreferenceCard(
-                icon = Icons.Filled.RestartAlt,
+                icon = Icons.Rounded.RestartAlt,
                 title = "重建索引",
                 subtitle = if (scanning) repoState.statusText
                 else "清空后重新扫描全部文件，耗时较长",
@@ -243,7 +243,7 @@ fun SettingsScreen(
             SectionHeader("结果")
 
             PreferenceCard(
-                icon = Icons.Filled.SortByAlpha,
+                icon = Icons.Rounded.SortByAlpha,
                 title = "排序方式",
                 subtitle = sortLabel,
                 onClick = { showSortDialog = true },
@@ -253,7 +253,7 @@ fun SettingsScreen(
             SectionHeader("其他")
 
             PreferenceCard(
-                icon = Icons.Filled.WbTwilight,
+                icon = Icons.Rounded.WbTwilight,
                 title = "重新查看欢迎页",
                 subtitle = "了解 Anything 的核心功能",
                 onClick = {
@@ -263,7 +263,7 @@ fun SettingsScreen(
             )
 
             PreferenceCard(
-                icon = Icons.Filled.Info,
+                icon = Icons.Rounded.Info,
                 title = "版本",
                 subtitle = "1.0.0-alpha5 · Apache-2.0",
             )
@@ -600,7 +600,7 @@ private fun PaletteSheet(
                 modifier = Modifier.padding(vertical = 4.dp),
             ) {
                 Icon(
-                    Icons.Filled.Palette,
+                    Icons.Rounded.Palette,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(24.dp),
@@ -623,7 +623,7 @@ private fun PaletteSheet(
 
             // 调色板风格（ImageToolbox 配色方案弹窗同款选项）
             SheetActionRow(
-                icon = Icons.Filled.Colorize,
+                icon = Icons.Rounded.Colorize,
                 title = "调色板风格",
                 subtitle = styleLabel(style),
                 enabled = !dynamicColorOn,
@@ -632,7 +632,7 @@ private fun PaletteSheet(
 
             // 反转颜色
             SheetActionRow(
-                icon = Icons.Filled.InvertColors,
+                icon = Icons.Rounded.InvertColors,
                 title = "反转颜色",
                 subtitle = "反转配色方案的所有颜色",
                 enabled = !dynamicColorOn,
@@ -648,7 +648,7 @@ private fun PaletteSheet(
 
             // 对比度
             SheetSliderRow(
-                icon = Icons.Filled.Contrast,
+                icon = Icons.Rounded.Contrast,
                 title = "对比度",
                 value = contrast,
                 enabled = !dynamicColorOn,
@@ -841,7 +841,7 @@ private fun PresetChip(
         if (selected) {
             val checkTint =
                 if (Color(roles.primary).luminance() > 0.5f) Color.Black else Color.White
-            Icon(Icons.Filled.Check, contentDescription = "已选中 $name", tint = checkTint)
+            Icon(Icons.Rounded.Check, contentDescription = "已选中 $name", tint = checkTint)
         }
     }
 }
@@ -889,7 +889,7 @@ private fun RoleSection(
                     )
                 }
                 Icon(
-                    if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                     contentDescription = if (expanded) "收起" else "展开",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

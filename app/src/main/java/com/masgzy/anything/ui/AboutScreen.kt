@@ -9,8 +9,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -39,7 +39,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 title = { Text("关于") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -68,7 +68,7 @@ fun AboutScreen(onBack: () -> Unit) {
                     verticalArrangement = Arrangement.Center,
                 ) {
                     Icon(
-                        Icons.Filled.Search,
+                        Icons.Rounded.Search,
                         null,
                         tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(56.dp),

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AnythingMobile 启动图标前景（MD3 风格，参照 ImageToolbox 的单色几何设计语言）：
+  圆角文档 + 正文行 + 罩在文档上的放大镜，纯白描线，108dp 自适应图标安全区。
+  镜片以背景色填充形成"透镜压在文档上"的层次感。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 文档：圆角矩形描边 -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M37.5,31 H52.5 A4.5,4.5 0 0 1 57,35.5 V72.5 A4.5,4.5 0 0 1 52.5,77 H37.5 A4.5,4.5 0 0 1 33,72.5 V35.5 A4.5,4.5 0 0 1 37.5,31 Z"
+        android:strokeColor="@color/ic_launcher_foreground"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="4" />
+
+    <!-- 正文三行（第三行收短，为放大镜留白） -->
+    <path
+        android:pathData="M39,43 H51"
+        android:strokeColor="@color/ic_launcher_foreground"
+        android:strokeLineCap="round"
+        android:strokeWidth="3.5" />
+    <path
+        android:pathData="M39,51 H51"
+        android:strokeColor="@color/ic_launcher_foreground"
+        android:strokeLineCap="round"
+        android:strokeWidth="3.5" />
+    <path
+        android:pathData="M39,59 H44"
+        android:strokeColor="@color/ic_launcher_foreground"
+        android:strokeLineCap="round"
+        android:strokeWidth="3.5" />
+
+    <!-- 镜片：填充底色遮住下方正文行，白描边 -->
+    <path
+        android:fillColor="@color/ic_launcher_background"
+        android:pathData="M46,58.5 A10.5,10.5 0 1 0 67,58.5 A10.5,10.5 0 1 0 46,58.5 Z"
+        android:strokeColor="@color/ic_launcher_foreground"
+        android:strokeWidth="4.5" />
+
+    <!-- 镜柄 -->
+    <path
+        android:pathData="M64.5,66.5 L71,73"
+        android:strokeColor="@color/ic_launcher_foreground"
+        android:strokeLineCap="round"
+        android:strokeWidth="5" />
+</vector>

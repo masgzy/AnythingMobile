@@ -47,17 +47,42 @@ func TestExtractDocx(t *testing.T) {
 	}
 }
 
+// makeZip 生成含多个成员的最小 zip 文件（测试夹具）。
+// members 为 member 与 body 交替出现的变长参数：member1, body1, member2, body2...
+func makeZip(t *testing.T, path string, members ...string) {
+	t.Helper()
+	if len(members)%2 != 0 {
+		t.Fatal("makeZip: 参数应为 member/body 成对出现")
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(f)
+	for i := 0; i < len(members); i += 2 {
+		w, err := zw.Create(members[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(members[i+1])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestExtractXlsxAndPptx(t *testing.T) {
 	dir := t.TempDir()
 
 	// xlsx: sharedStrings
 	xp := filepath.Join(dir, "t.xlsx")
-	f, _ := os.Create(xp)
-	zw := zip.NewWriter(f)
-	w, _ := zw.Create("xl/sharedStrings.xml")
-	w.Write([]byte(`<?xml version="1.0"?><sst xmlns="urn:x"><si><t>表格单元格内容</t></si><si><t>第二格</t></si></sst>`))
-	zw.Close()
-	f.Close()
+	makeZip(t, xp, "xl/sharedStrings.xml",
+		`<?xml version="1.0"?><sst xmlns="urn:x"><si><t>表格单元格内容</t></si><si><t>第二格</t></si></sst>`)
 
 	text, err := ExtractText(xp)
 	if err != nil || !strings.Contains(text, "表格单元格内容") {
@@ -66,14 +91,12 @@ func TestExtractXlsxAndPptx(t *testing.T) {
 
 	// pptx: slides（乱序写入，验证按编号排序抽取）
 	pp := filepath.Join(dir, "t.pptx")
-	f2, _ := os.Create(pp)
-	zw2 := zip.NewWriter(f2)
-	w2, _ := zw2.Create("ppt/slides/slide2.xml")
-	w2.Write([]byte(`<?xml version="1.0"?><p:sld xmlns:p="urn:x"><p:sp><a:t xmlns:a="urn:y">第二页</a:t></p:sp></p:sld>`))
-	w3, _ := zw2.Create("ppt/slides/slide1.xml")
-	w3.Write([]byte(`<?xml version="1.0"?><p:sld xmlns:p="urn:x"><p:sp><a:t xmlns:a="urn:y">第一页</a:t></p:sp></p:sld>`))
-	zw2.Close()
-	f2.Close()
+	makeZip(t, pp,
+		"ppt/slides/slide2.xml",
+		`<?xml version="1.0"?><p:sld xmlns:p="urn:x"><p:sp><a:t xmlns:a="urn:y">第二页</a:t></p:sp></p:sld>`,
+		"ppt/slides/slide1.xml",
+		`<?xml version="1.0"?><p:sld xmlns:p="urn:x"><p:sp><a:t xmlns:a="urn:y">第一页</a:t></p:sp></p:sld>`,
+	)
 
 	text2, err := ExtractText(pp)
 	if err != nil || !strings.Contains(text2, "第一页") || !strings.Contains(text2, "第二页") {

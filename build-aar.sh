@@ -5,7 +5,7 @@
 # 产物: app/libs/engine.aar (arm64-v8a / armeabi-v7a / x86_64)
 #
 # 依赖:
-#   1. Go >= 1.23           https://go.dev/dl/
+#   1. Go >= 1.27           https://go.dev/dl/
 #   2. Android NDK          环境变量 ANDROID_NDK_HOME 指向 NDK 根目录
 #                           (Android Studio 用户通常在
 #                            ~/Android/Sdk/ndk/<version>)
@@ -24,7 +24,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # ---- 环境检查 ----
-command -v go >/dev/null 2>&1 || { echo "错误: 未安装 Go (需要 >= 1.23)"; exit 1; }
+command -v go >/dev/null 2>&1 || { echo "错误: 未安装 Go (需要 >= 1.27)"; exit 1; }
 
 if [ -z "${ANDROID_NDK_HOME:-}" ] && [ -n "${ANDROID_NDK_LATEST_HOME:-}" ]; then
   export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
@@ -43,27 +43,19 @@ JAVA_HOME_SET="${JAVA_HOME:-}"
   { echo "错误: 需要 JDK 17+ (javac)"; exit 1; }
 
 # ---- 安装 gomobile 并补齐 go.mod indirect 依赖 ----
-# 版本钉死（可复现构建，防上游漂移）：
-#   x/mobile 的 go 指令演进：2025-08-13 起要求 Go>=1.24，
-#   2026-02-11 起要求 Go>=1.25，2026-08-21 起要求 Go>=1.26。
-#   395d808d53cd（2025-08-08，go 指令 1.23.0）是最后一个兼容本项目
-#   基线 Go 1.23 的快照。升级 pin 前必须先核对上游 go 指令仍 <= 1.23：
-#     curl -s https://raw.githubusercontent.com/golang/mobile/<sha>/go.mod
-#   或整体升级项目 Go 基线后再跟进。
-GOMOBILE_PIN=395d808d53cd
-
+# 2026-09 起解钉：项目 Go 基线已升到 1.27，满足 x/mobile 上游
+# go 指令（现要求 >=1.26.0），“gomobile@latest 安装失败”的根因消除。
+# 上游再抬高要求时仅需同步抬高本项目 Go 基线（go.mod + ci.yml）。
 command -v gomobile >/dev/null 2>&1 || {
-  echo "安装 gomobile (pin: $GOMOBILE_PIN)..."
-  go install "golang.org/x/mobile/cmd/gomobile@${GOMOBILE_PIN}"
+  echo "安装 gomobile (@latest)..."
+  go install golang.org/x/mobile/cmd/gomobile@latest
 }
-# gobind 同样钉死：bind 仅依赖 PATH 中的 gobind（bind.go: exec.LookPath），
-# 无需 gomobile init —— init 内部写死 gobind@latest，在 GOTOOLCHAIN=local
-# 下会拉到要求 Go>=1.26 的上游快照而失败（2026-08-30 CI 故障根因链）。
+# bind 仅依赖 PATH 中的 gobind（bind.go: exec.LookPath），无需 gomobile init。
 command -v gobind >/dev/null 2>&1 || {
-  echo "安装 gobind (pin: $GOMOBILE_PIN)..."
-  go install "golang.org/x/mobile/cmd/gobind@${GOMOBILE_PIN}"
+  echo "安装 gobind (@latest)..."
+  go install golang.org/x/mobile/cmd/gobind@latest
 }
-(cd core && go get golang.org/x/mobile/cmd/gomobile@"${GOMOBILE_PIN}")
+(cd core && go get golang.org/x/mobile/cmd/gomobile@latest)
 
 # ---- 编译 AAR（含 16KB 页对齐链接参数） ----
 # 注意：bind 必须在 Go 模块目录（core/）内执行

@@ -32,16 +32,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Help
-import androidx.compose.material.icons.filled.AllInclusive
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.automirrored.rounded.Help
+import androidx.compose.material.icons.rounded.AllInclusive
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DoneAll
+import androidx.compose.material.icons.rounded.FilterList
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -192,7 +192,9 @@ fun SearchScreen(
         },
     ) {
         Scaffold(
-            snackbarHost = { SnackbarHost(snackbarHostState) },
+            // 刻意不使用 Scaffold 的 snackbarHost（默认吸底）：
+            // 底部提示会盖住筛选圆钮，短时间内无法再次点击；
+            // SnackbarHost 改挂载在内容区顶部（原版即顶部提示），不遮拦任何控件。
             topBar = {
                 // 顶栏切换带淡入淡出，避免生硬跳变
                 AnimatedContent(
@@ -299,6 +301,14 @@ fun SearchScreen(
                     IndexUpdatingPill(scanned = repoState.scanned)
                 }
 
+                // 顶部提示（Snackbar）：挂内容区顶部，不挡筛选钮
+                SnackbarHost(
+                    hostState = snackbarHostState,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 10.dp),
+                )
+
                 // 底部筛选区（目录名页不显示，还原原版）
                 if (pagerState.currentPage != 2 && repoState.phase != ScanPhase.FIRST_BUILD) {
                     FilterPanel(
@@ -310,14 +320,9 @@ fun SearchScreen(
                             if (pagerState.currentPage == 0) nameFilter = c else officeFilter = c
                         },
                         modifier = Modifier.align(Alignment.BottomCenter),
+                        sortLabel = if (settings.sortByName) "已按名称排序" else "已按时间排序",
                         onToggleSort = {
-                            val next = !settings.sortByName
-                            viewModel.updateSettings { s -> s.copy(sortByName = next) }
-                            scope.launch {
-                                snackbarHostState.showSnackbar(
-                                    if (next) "已按名称排序" else "已按时间排序"
-                                )
-                            }
+                            viewModel.updateSettings { s -> s.copy(sortByName = !s.sortByName) }
                         },
                     )
                 }
@@ -458,6 +463,7 @@ private fun FilterPanel(
     onToggleExpand: () -> Unit,
     onSelect: (FileCategory) -> Unit,
     modifier: Modifier = Modifier,
+    sortLabel: String,
     onToggleSort: () -> Unit,
 ) {
     val options = if (page == 0) {
@@ -502,7 +508,7 @@ private fun FilterPanel(
         ) {
             FilterButton(
                 label = "所有",
-                icon = Icons.Filled.AllInclusive,
+                icon = Icons.Rounded.AllInclusive,
                 selected = current.isAll,
                 size = 56.dp,
                 onClick = {
@@ -512,9 +518,12 @@ private fun FilterPanel(
             )
             Spacer(Modifier.height(12.dp))
             FilterButton(
-                icon = Icons.Filled.FilterList,
+                icon = Icons.Rounded.FilterList,
                 selected = false,
                 size = 44.dp,
+                // 点击后浮现的排序提示气泡（替代原吸底 Snackbar：
+                // 底部提示会盖住按钮本体，短时间内无法连续切换）
+                label = sortLabel,
                 onClick = onToggleSort,
             )
         }
@@ -538,12 +547,12 @@ private fun SearchTopBar(
         ),
         navigationIcon = {
             IconButton(onClick = onOpenDrawer) {
-                Icon(Icons.Filled.Menu, "菜单")
+                Icon(Icons.Rounded.Menu, "菜单")
             }
         },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Search, null, modifier = Modifier.size(22.dp))
+                Icon(Icons.Rounded.Search, null, modifier = Modifier.size(22.dp))
                 Spacer(Modifier.width(10.dp))
                 BasicTextField(
                     value = query,
@@ -590,12 +599,12 @@ private fun SelectionTopBar(
             actionIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         ),
         navigationIcon = {
-            IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "取消选择") }
+            IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, "取消选择") }
         },
         title = { Text("已选择 $count 项") },
         actions = {
-            IconButton(onClick = onSelectAll) { Icon(Icons.Filled.DoneAll, "全选") }
-            IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, "删除") }
+            IconButton(onClick = onSelectAll) { Icon(Icons.Rounded.DoneAll, "全选") }
+            IconButton(onClick = onDelete) { Icon(Icons.Rounded.Delete, "删除") }
         },
     )
 }
@@ -633,19 +642,19 @@ private fun AppDrawer(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(Modifier.height(8.dp))
                 NavigationDrawerItem(
-                    icon = { Icon(Icons.Filled.Settings, null) },
+                    icon = { Icon(Icons.Rounded.Settings, null) },
                     label = { Text("设置") },
                     selected = false,
                     onClick = onSettings,
                 )
                 NavigationDrawerItem(
-                    icon = { Icon(Icons.AutoMirrored.Filled.Help, null) },
+                    icon = { Icon(Icons.AutoMirrored.Rounded.Help, null) },
                     label = { Text("欢迎页") },
                     selected = false,
                     onClick = { onWelcome(ROUTE_WELCOME) },
                 )
                 NavigationDrawerItem(
-                    icon = { Icon(Icons.Filled.Info, null) },
+                    icon = { Icon(Icons.Rounded.Info, null) },
                     label = { Text("关于") },
                     selected = false,
                     onClick = onAbout,

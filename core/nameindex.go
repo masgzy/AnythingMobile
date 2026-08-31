@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"unicode/utf8"
 )
 
 // NameIndex 基于 2-gram 倒排的名称索引（文件与目录通用，由 kind 区分）：
@@ -17,12 +16,12 @@ import (
 //     全量索引十万文件时退化为 O(N^2)，是实测性能瓶颈）；
 //   - lookupPath / RemovePath / RemoveExcept 支撑"进入应用自动增量重扫"。
 type NameIndex struct {
-	mu    sync.RWMutex
-	kind  string // "file" | "folder"，写入搜索结果的 Kind 字段
-	docs  map[uint32]*docInfo
+	mu     sync.RWMutex
+	kind   string // "file" | "folder"，写入搜索结果的 Kind 字段
+	docs   map[uint32]*docInfo
 	byPath map[string]uint32
-	grams map[string]map[uint32]struct{}
-	next  uint32
+	grams  map[string]map[uint32]struct{}
+	next   uint32
 }
 
 type docInfo struct {
@@ -138,35 +137,14 @@ func (n *NameIndex) Search(q string, limit int) []FileHit {
 	if ql == "" || limit <= 0 {
 		return nil
 	}
-	runes := []rune(ql)
 
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
-	var candidates map[uint32]struct{}
-	if utf8.RuneCountInString(ql) >= 2 {
-		for i := 0; i+2 <= len(runes); i++ {
-			g := string(runes[i : i+2])
-			set := n.grams[g]
-			if len(set) == 0 {
-				return nil // 某个 bigram 无命中 => 不可能子串匹配
-			}
-			if candidates == nil {
-				candidates = make(map[uint32]struct{}, len(set))
-				for id := range set {
-					candidates[id] = struct{}{}
-				}
-				continue
-			}
-			for id := range candidates {
-				if _, ok := set[id]; !ok {
-					delete(candidates, id)
-				}
-			}
-			if len(candidates) == 0 {
-				return nil
-			}
-		}
+	// bigram 倒排先收敛候选集，再对候选做精确子串校验。
+	candidates, ok := n.candidatesFor([]rune(ql))
+	if !ok {
+		return nil // 某个 bigram 无命中 => 不可能子串匹配
 	}
 
 	hits := make([]FileHit, 0, 32)
@@ -195,6 +173,40 @@ func (n *NameIndex) Search(q string, limit int) []FileHit {
 		hits = hits[:limit]
 	}
 	return hits
+}
+
+// candidatesFor 计算查询词全部 bigram 的倒排交集（调用方需持有读锁）。
+//
+// 返回值语义：
+//   - ok=false：某个 bigram 无倒排记录或交集为空 => 不可能子串命中；
+//   - ok=true 且 candidates=nil：单字符查询，无需候选过滤；
+//   - 其余：候选 id 集，扫描时只需遍历这些文档。
+func (n *NameIndex) candidatesFor(runes []rune) (candidates map[uint32]struct{}, ok bool) {
+	if len(runes) < 2 {
+		return nil, true
+	}
+	for i := 0; i+2 <= len(runes); i++ {
+		set := n.grams[string(runes[i:i+2])]
+		if len(set) == 0 {
+			return nil, false
+		}
+		if candidates == nil {
+			candidates = make(map[uint32]struct{}, len(set))
+			for id := range set {
+				candidates[id] = struct{}{}
+			}
+			continue
+		}
+		for id := range candidates {
+			if _, inSet := set[id]; !inSet {
+				delete(candidates, id)
+			}
+		}
+		if len(candidates) == 0 {
+			return nil, false
+		}
+	}
+	return candidates, true
 }
 
 // removeLocked 删除指定 id 的文档及其全部倒排记录。调用方需持有写锁。
