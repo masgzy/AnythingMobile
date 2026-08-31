@@ -75,6 +75,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             setInvertColors(next.invertColors)
             setAmoled(next.amoled)
             setAutoScanOnEnter(next.autoScanOnEnter)
+            setFilterLabelSeconds(next.filterLabelSeconds)
             setSortByName(next.sortByName)
         }
     }

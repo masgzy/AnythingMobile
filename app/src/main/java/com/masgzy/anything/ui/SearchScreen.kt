@@ -8,9 +8,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -34,6 +32,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Help
 import androidx.compose.material.icons.rounded.AllInclusive
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DoneAll
@@ -59,9 +58,6 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
@@ -105,12 +101,16 @@ const val ROUTE_WELCOME = "welcome"
 /**
  * 搜索主界面 —— 布局与交互对齐原版 Anything：
  * 主色 AppBar 内嵌搜索框、"文件名 / office 文档正文 / 目录名"三页签、
- * 底部筛选（默认仅 ∞ 所有与漏斗，点 ∞ 弹出类别钮）、
+ * 底部筛选（默认仅 ∞ 所有与漏斗，点 ∞ 弹出类别钮，文字标签自动显示后超时消失）、
  * 长按多选删除、结果详情面板。
  *
- * 索引更新：进入应用自动增量扫描（索引已持久化，通常一闪而过），
- * 顶部悬浮提示"更新索引中…"，完成后 Snackbar 提示"索引更新完成"。
+ * 索引更新（对齐原版"融入顶部 UI"的做法）：进入应用自动增量扫描时，
+ * 顶部搜索栏的占位文字直接替换为"更新索引中..."（无悬浮胶囊/无弹窗）；
+ * 完成后同一位置短暂显示"索引更新完成"再自动还原。首次建索引仍为全屏遮罩。
  */
+/** 顶部搜索栏融入式状态提示（null = 常规搜索框）。 */
+private data class TopBarStatus(val text: String, val busy: Boolean)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
@@ -122,7 +122,6 @@ fun SearchScreen(
     val context = LocalContext.current
     val repoState by viewModel.repo.state.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(pageCount = { 3 })
 
@@ -154,28 +153,26 @@ fun SearchScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // "索引更新完成"提示：每次扫描收尾触发一次（原版提示文案）。
+    // 顶部搜索栏融入式状态：扫描中 → "更新索引中..."；完成 → 短暂显示后自动还原。
+    // 与原版一致：提示即顶栏本身（占位文字替换），无悬浮胶囊、无 Snackbar。
+    var doneStatus by remember { mutableStateOf<TopBarStatus?>(null) }
+    var shownSummary by remember { mutableStateOf<Any?>(null) }
     LaunchedEffect(repoState.lastSummary) {
         val s = repoState.lastSummary ?: return@LaunchedEffect
-        val msg = when {
-            s.cancelled -> "索引更新已取消"
-            s.firstBuild -> "首次索引创建完成，共索引 ${s.files} 项"
-            s.changed -> "索引更新完成：新增 ${s.added}，更新 ${s.updated}，移除 ${s.removed}"
-            else -> "索引更新完成，没有文件变动"
-        }
-        snackbarHostState.showSnackbar(msg)
+        // 避免从设置页返回等重组场景重复提示
+        if (s == shownSummary) return@LaunchedEffect
+        shownSummary = s
+        doneStatus = TopBarStatus(
+            if (s.cancelled) "索引更新已取消" else "索引更新完成",
+            busy = false,
+        )
+        delay(2500)
+        doneStatus = null
     }
-
-    // "更新索引中"胶囊延迟显示：无变动时增量扫描瞬间完成，
-    // 提示一闪而过反而显得慢；超过 600ms 才出现，观感与原版一致。
-    var pillVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(repoState.phase) {
-        if (repoState.phase == ScanPhase.UPDATING) {
-            delay(600)
-            pillVisible = repoState.phase == ScanPhase.UPDATING
-        } else {
-            pillVisible = false
-        }
+    val barStatus = if (repoState.phase == ScanPhase.UPDATING) {
+        TopBarStatus("更新索引中...", busy = true)
+    } else {
+        doneStatus
     }
 
     // 多选模式下拦截返回键
@@ -192,9 +189,6 @@ fun SearchScreen(
         },
     ) {
         Scaffold(
-            // 刻意不使用 Scaffold 的 snackbarHost（默认吸底）：
-            // 底部提示会盖住筛选圆钮，短时间内无法再次点击；
-            // SnackbarHost 改挂载在内容区顶部（原版即顶部提示），不遮拦任何控件。
             topBar = {
                 // 顶栏切换带淡入淡出，避免生硬跳变
                 AnimatedContent(
@@ -221,6 +215,7 @@ fun SearchScreen(
                             onOpenDrawer = {
                                 scope.launch { drawerState.open() }
                             },
+                            status = barStatus,
                         )
                     }
                 }
@@ -286,28 +281,7 @@ fun SearchScreen(
                     }
                 }
 
-                // 索引更新悬浮提示：悬浮于内容之上，不推挤布局；
-                // 延迟出现（见上方 pillVisible），出/入带滑入滑出动画
-                AnimatedVisibility(
-                    visible = pillVisible,
-                    enter = fadeIn(tween(200)) +
-                        slideInVertically(tween(220, easing = FastOutSlowInEasing)) { -it },
-                    exit = fadeOut(tween(200)) +
-                        slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { -it },
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 10.dp),
-                ) {
-                    IndexUpdatingPill(scanned = repoState.scanned)
-                }
-
-                // 顶部提示（Snackbar）：挂内容区顶部，不挡筛选钮
-                SnackbarHost(
-                    hostState = snackbarHostState,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 10.dp),
-                )
+                // 索引状态已融入顶栏搜索框（见 TopBarStatus），不再使用悬浮胶囊/Snackbar
 
                 // 底部筛选区（目录名页不显示，还原原版）
                 if (pagerState.currentPage != 2 && repoState.phase != ScanPhase.FIRST_BUILD) {
@@ -320,6 +294,7 @@ fun SearchScreen(
                             if (pagerState.currentPage == 0) nameFilter = c else officeFilter = c
                         },
                         modifier = Modifier.align(Alignment.BottomCenter),
+                        labelSeconds = settings.filterLabelSeconds,
                         sortLabel = if (settings.sortByName) "已按名称排序" else "已按时间排序",
                         onToggleSort = {
                             viewModel.updateSettings { s -> s.copy(sortByName = !s.sortByName) }
@@ -454,6 +429,10 @@ private fun HitListPage(
  * 默认只在右下角显示 ∞"所有"（抬高错落）与漏斗排序钮；
  * 点击 ∞ 后类别钮（视频/音乐/图片/文档 或 Excel/PPT/Word）
  * 从左侧滑出，选择后即时过滤结果；再点 ∞ 复位为所有并收回。
+ *
+ * 文字标签（用户定制交互）：展开后所有钮上方的文字标签自动显示，
+ * labelSeconds 秒后自动消失；点击任意类别钮重新显示并重置计时。
+ * labelSeconds：0=不自动显示，-1=常驻，>0=自动隐藏秒数（设置页可改）。
  */
 @Composable
 private fun FilterPanel(
@@ -463,6 +442,7 @@ private fun FilterPanel(
     onToggleExpand: () -> Unit,
     onSelect: (FileCategory) -> Unit,
     modifier: Modifier = Modifier,
+    labelSeconds: Int,
     sortLabel: String,
     onToggleSort: () -> Unit,
 ) {
@@ -472,8 +452,29 @@ private fun FilterPanel(
         // 顺序还原原版 office 页：Excel / PPT / Word
         listOf(FileCategory.EXCEL, FileCategory.PPT, FileCategory.WORD)
     }
+
+    // 标签自动显隐：展开即显示（常驻除外）→ 超时消失；labelTick 变化=点击重显+重置计时
+    var labelsShown by remember { mutableStateOf(false) }
+    var labelTick by remember { mutableStateOf(0) }
+    LaunchedEffect(expanded, labelSeconds, labelTick) {
+        if (!expanded) {
+            labelsShown = false
+            return@LaunchedEffect
+        }
+        when {
+            labelSeconds == -1 -> labelsShown = true
+            labelSeconds > 0 -> {
+                labelsShown = true
+                delay(labelSeconds * 1000L)
+                labelsShown = false
+            }
+            // 0 = 不自动显示
+            else -> labelsShown = false
+        }
+    }
+
     Box(modifier.fillMaxWidth()) {
-        // 类别钮：点"所有"后弹出，滑入/淡入动画
+        // 类别钮：点"所有"后弹出，滑入/淡入动画；文字标签随 labelsShown 显隐
         AnimatedVisibility(
             visible = expanded,
             enter = fadeIn(tween(220)) +
@@ -493,7 +494,12 @@ private fun FilterPanel(
                         label = opt.label,
                         icon = opt.icon,
                         selected = current == opt,
-                        onClick = { onSelect(if (current == opt) FileCategory.ALL else opt) },
+                        labelVisible = labelsShown,
+                        onClick = {
+                            // 点击重显标签并重置自动隐藏计时
+                            labelTick++
+                            onSelect(if (current == opt) FileCategory.ALL else opt)
+                        },
                     )
                 }
             }
@@ -511,6 +517,7 @@ private fun FilterPanel(
                 icon = Icons.Rounded.AllInclusive,
                 selected = current.isAll,
                 size = 56.dp,
+                labelVisible = labelsShown,
                 onClick = {
                     if (!current.isAll) onSelect(FileCategory.ALL)
                     onToggleExpand()
@@ -521,8 +528,7 @@ private fun FilterPanel(
                 icon = Icons.Rounded.FilterList,
                 selected = false,
                 size = 44.dp,
-                // 点击后浮现的排序提示气泡（替代原吸底 Snackbar：
-                // 底部提示会盖住按钮本体，短时间内无法连续切换）
+                // 点击后浮现的排序提示气泡（操作确认，固定短时长）
                 label = sortLabel,
                 onClick = onToggleSort,
             )
@@ -530,13 +536,20 @@ private fun FilterPanel(
     }
 }
 
-/** 普通态顶栏：汉堡 + 放大镜 + 搜索输入（原版样式，M3 配色）。 */
+/**
+ * 普通态顶栏：汉堡 + 状态/放大镜 + 搜索输入（原版样式，M3 配色）。
+ *
+ * status 非 null 时融入式提示：放大镜位置换成小圈进度（扫描中）或对勾（完成），
+ * 占位文字换成状态文案 —— 提示即顶栏本身，无任何悬浮层；
+ * 已输入查询时占位区被内容占据，状态自然让位给用户输入。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SearchTopBar(
     query: String,
     onQueryChange: (String) -> Unit,
     onOpenDrawer: () -> Unit,
+    status: TopBarStatus? = null,
 ) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
@@ -552,7 +565,29 @@ private fun SearchTopBar(
         },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Search, null, modifier = Modifier.size(22.dp))
+                AnimatedContent(
+                    targetState = status,
+                    transitionSpec = {
+                        fadeIn(tween(180)) togetherWith fadeOut(tween(140))
+                    },
+                    label = "topStatusIcon",
+                ) { st ->
+                    when {
+                        st == null -> Icon(
+                            Icons.Rounded.Search, null,
+                            modifier = Modifier.size(22.dp),
+                        )
+                        st.busy -> CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                        else -> Icon(
+                            Icons.Rounded.CheckCircle, null,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
                 Spacer(Modifier.width(10.dp))
                 BasicTextField(
                     value = query,
@@ -567,9 +602,10 @@ private fun SearchTopBar(
                         Box {
                             if (query.isEmpty()) {
                                 Text(
-                                    "请输入查询关键词",
+                                    status?.text ?: "请输入查询关键词",
                                     color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f),
                                     fontSize = 17.sp,
+                                    maxLines = 1,
                                 )
                             }
                             inner()
@@ -711,33 +747,6 @@ private fun PermissionCard(onRequest: () -> Unit, onAppDetails: () -> Unit) {
                 Button(onClick = onRequest) { Text("去授权") }
                 TextButton(onClick = onAppDetails) { Text("打开应用详情") }
             }
-        }
-    }
-}
-
-/** 索引更新悬浮提示（"更新索引中… 已扫描 X 项"）：胶囊样式，不占布局。 */
-@Composable
-private fun IndexUpdatingPill(scanned: Long) {
-    Surface(
-        shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        shadowElevation = 3.dp,
-    ) {
-        Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(14.dp),
-                strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                if (scanned > 0) "更新索引中… 已扫描 $scanned 项" else "更新索引中…",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
         }
     }
 }

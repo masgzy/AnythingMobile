@@ -38,6 +38,7 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.InvertColors
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Label
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.SortByAlpha
@@ -78,6 +79,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.masgzy.anything.AppViewModel
+import com.masgzy.anything.BuildConfig
 import com.masgzy.anything.data.PalettePreset
 import com.masgzy.anything.data.RoleColors
 import com.masgzy.anything.data.ScanPhase
@@ -110,6 +112,7 @@ fun SettingsScreen(
     var showPaletteSheet by remember { mutableStateOf(false) }
     var showStyleDialog by remember { mutableStateOf(false) }
     var showSortDialog by remember { mutableStateOf(false) }
+    var showFilterLabelDialog by remember { mutableStateOf(false) }
 
     val modeLabel = when (settings.themeMode) {
         ThemeMode.SYSTEM -> "跟随系统"
@@ -249,6 +252,13 @@ fun SettingsScreen(
                 onClick = { showSortDialog = true },
             )
 
+            PreferenceCard(
+                icon = Icons.Rounded.Label,
+                title = "筛选文字显示时长",
+                subtitle = "点击「所有」后类别文字的停留时间 · " + filterLabelLabel(settings.filterLabelSeconds),
+                onClick = { showFilterLabelDialog = true },
+            )
+
             // ---- 其他 ----
             SectionHeader("其他")
 
@@ -265,7 +275,7 @@ fun SettingsScreen(
             PreferenceCard(
                 icon = Icons.Rounded.Info,
                 title = "版本",
-                subtitle = "1.0.0-alpha5 · Apache-2.0",
+                subtitle = "${BuildConfig.VERSION_NAME} · Apache-2.0",
             )
         }
     }
@@ -375,7 +385,32 @@ fun SettingsScreen(
             onDismiss = { showSortDialog = false },
         )
     }
+
+    // ---- 筛选文字显示时长 ----
+    if (showFilterLabelDialog) {
+        OptionsDialog(
+            title = "筛选文字显示时长",
+            options = FILTER_LABEL_OPTIONS,
+            selected = settings.filterLabelSeconds,
+            onSelect = { seconds ->
+                viewModel.updateSettings { s -> s.copy(filterLabelSeconds = seconds) }
+            },
+            onDismiss = { showFilterLabelDialog = false },
+        )
+    }
 }
+
+/** 筛选文字时长选项：0=不自动显示，-1=常驻，>0=自动隐藏秒数。 */
+private val FILTER_LABEL_OPTIONS = listOf(
+    0 to "不自动显示",
+    3 to "3 秒",
+    5 to "5 秒（默认）",
+    10 to "10 秒",
+    -1 to "常驻显示",
+)
+
+private fun filterLabelLabel(seconds: Int): String =
+    FILTER_LABEL_OPTIONS.firstOrNull { it.first == seconds }?.second ?: "$seconds 秒"
 
 /** 配色方案卡片的副标题：说明当前外观来源（动态取色/预设/自定义）。 */
 private fun paletteSubtitle(settings: com.masgzy.anything.data.AppSettings, monet: Boolean): String {

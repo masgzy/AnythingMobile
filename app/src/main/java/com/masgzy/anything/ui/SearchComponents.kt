@@ -275,10 +275,14 @@ private fun SheetAction(icon: ImageVector, label: String, onClick: () -> Unit) {
 }
 
 /**
- * 底部筛选圆钮（MD3 Rounded 图标 + 点击后浮现的提示气泡）。
+ * 底部筛选圆钮（MD3 Rounded 图标 + 提示文字标签）。
  *
- * 交互还原原版：图标默认裸露，不常驻文字标签；点击后才在按钮上方
- * 浮现提示气泡，约 1.4 秒后自动淡出 —— 既不遮挡内容，又能确认操作。
+ * 标签显隐两种模式：
+ *  - labelVisible = null（自控）：点击后浮现气泡，约 1.4 秒后自动淡出
+ *    （用于漏斗排序钮的操作确认）；
+ *  - labelVisible = Boolean（父控）：显隐完全由父级控制
+ *    （用于类别钮：点"所有"展开后自动显示、超时消失、点击重显，
+ *    时长在设置页自定义）。
  *
  * 实现细节：气泡区域用固定高度占位（labelSlot），出现/消失仅做
  * 淡入缩放动画，按钮位置不跳动；label 传 null 时无气泡（也不占位）。
@@ -290,15 +294,19 @@ fun FilterButton(
     onClick: () -> Unit,
     label: String? = null,
     size: Dp = 48.dp,
+    labelVisible: Boolean? = null,
 ) {
-    // 点击后短暂显示提示气泡，超时自动淡出
-    var showLabel by remember { mutableStateOf(false) }
-    LaunchedEffect(showLabel) {
-        if (showLabel) {
-            delay(1400)
-            showLabel = false
+    // 自控模式：点击后短暂显示提示气泡，超时自动淡出
+    var selfShow by remember { mutableStateOf(false) }
+    if (labelVisible == null) {
+        LaunchedEffect(selfShow) {
+            if (selfShow) {
+                delay(1400)
+                selfShow = false
+            }
         }
     }
+    val showLabel = labelVisible ?: selfShow
     val containerColor by animateColorAsState(
         targetValue = if (selected) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -352,7 +360,8 @@ fun FilterButton(
                 .size(size)
                 .clip(CircleShape)
                 .clickable {
-                    showLabel = true
+                    // 父控模式下显隐由父级决定，不触发自显气泡
+                    if (labelVisible == null) selfShow = true
                     onClick()
                 },
             contentAlignment = Alignment.Center,
