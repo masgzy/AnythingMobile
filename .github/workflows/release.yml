@@ -1,8 +1,8 @@
 name: Release
 
-# 推送 v* 标签时自动构建并发布 Release：APK 以单文件附件形式挂载（不打包 zip）。
-# 说明：当前处于 alpha 阶段，尚未发布首个版本；本工作流已就绪，
-# 待维护者确认后执行 git tag v1.0.0-alpha1 && git push origin v1.0.0-alpha1 即触发。
+# 推送 v* 标签时自动构建并发布 prerelease：APK 以单文件附件形式挂载（不打包 zip）。
+# alpha 阶段用 debug 签名（可直接安装体验）；工程参数与 ci.yml 保持一致
+#（Go 1.27 / Gradle wrapper 9.7.1），产物统一重命名后上传。
 
 on:
   push:
@@ -20,10 +20,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: 安装 Go 1.23
+      - name: 安装 Go 1.27
         uses: actions/setup-go@v7
         with:
-          go-version: '1.23'
+          go-version: '1.27'
 
       - name: Go 引擎测试（发布前把关）
         run: |
@@ -44,15 +44,34 @@ jobs:
 
       - name: 构建 APK（多 ABI + universal）
         run: |
-          gradle wrapper --gradle-version 8.9
+          gradle wrapper --gradle-version 9.7.1
           ./gradlew :app:assembleDebug --no-daemon
 
       # alpha 阶段使用 debug 签名（可直接安装体验）；
       # 正式版将切换 assembleRelease 并配置正式签名。
+      # splits 全局生效：debug 也产出 4 个 APK（app-*-debug.apk），
+      # 需重命名为 AnythingMobile-<版本>-<abi>.apk 后再上传。
+      - name: 产物清单（统一重命名为 AnythingMobile-<版本>-<abi>.apk）
+        run: |
+          VERSION=$(sed -n 's/.*versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -1)
+          OUT=app/build/outputs/apk/debug
+          mkdir -p "$OUT/renamed"
+          for f in "$OUT"/*-debug.apk; do
+            case "$f" in
+              *arm64-v8a*)   ABI=arm64-v8a ;;
+              *armeabi-v7a*) ABI=armeabi-v7a ;;
+              *x86_64*)      ABI=x86_64 ;;
+              *)             ABI=universal ;;
+            esac
+            mv "$f" "$OUT/renamed/AnythingMobile-$VERSION-$ABI.apk"
+          done
+          ls -lh "$OUT/renamed"
+          echo "APK_DIR=$OUT/renamed" >> "$GITHUB_ENV"
+
       - name: 发布到 GitHub Releases（APK 单文件附件）
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${GITHUB_REF_NAME}"
           gh release create "$TAG" --title "AnythingMobile $TAG" --generate-notes --prerelease
-          gh release upload "$TAG" app/build/outputs/apk/debug/AnythingMobile-*.apk
+          gh release upload "$TAG" "$APK_DIR"/*.apk

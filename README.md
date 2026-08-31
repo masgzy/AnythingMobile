@@ -95,7 +95,7 @@ Go 高性能内核 × Kotlin Compose 原生外壳 · **完全离线 · 无广告
 - [voidtools Everything](https://www.voidtools.com/) —— 灵感来源；
 - **Anything**（SumStudio / SincereXIA 开发的闭源应用）—— 本仓库为致敬式开源重写，未使用其任何代码；
 - [ImageToolbox](https://github.com/T8RIN/ImageToolbox) —— Material You 界面设计参考；
-- [vivo Sans](https://developers.vivo.com/) —— 启动图标 "ANY" 字标使用 vivo 官方免费商用字体 vivo Sans（Global Heavy）字形轮廓；本仓库不分发字体文件本身，仅嵌入由其创作的图标作品。
+- [vivo Sans](https://developers.vivo.com/) —— 启动图标 "Anything" 字标使用 vivo 官方免费商用字体 vivo Sans（Global Heavy）字形轮廓；本仓库不分发字体文件本身，仅嵌入由其创作的图标作品。
 
 <details>
 <summary><b>开发者入口（架构 / 构建 / 依赖许可）</b></summary>
