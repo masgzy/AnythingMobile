@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  AnythingMobile 启动图标前景 —— "镜下文件名"：
-  一枚粗壮的实心放大镜，镜片内以负空间镂刻两行文件名，
-  对象（文件行）与动作（搜索）融为一体，单一剪影，
-  设计语言对齐 ImageToolbox（实心粗体 + 负空间 + 高对比）。
-  镜片内的文件行用 evenOdd 真镂空：主题图标(monochrome)下同样保留。
+  AnythingMobile 启动图标前景 —— 第三轮"镜中字母 A"：
+  浅靛底上的一枚深靛实心放大镜，镜片（透底）内是 Anything 的首字母 A。
+  单一粗壮剪影 + 负空间，设计语言对齐 ImageToolbox（浅底深图、同色系高对比）。
+  镜片为真实透明（无遮挡物），主题图标(monochrome)下 A 与镜环天然成立。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -12,16 +11,23 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- 镜柄：45° 圆头粗柄 -->
+    <!-- 45° 圆头镜柄（先画，近端压入镜环相融） -->
     <path
-        android:pathData="M67.15,67.15 L75.15,75.15"
+        android:pathData="M65.23,64.23 L71.59,70.59"
         android:strokeColor="@color/ic_launcher_foreground"
         android:strokeLineCap="round"
-        android:strokeWidth="11" />
+        android:strokeWidth="9.5" />
 
-    <!-- 镜片：实心圆 + 两行文件名镂空（evenOdd） -->
+    <!-- 镜片环：外 R19 / 内 R12（evenOdd，镜内透底） -->
     <path
         android:fillColor="@color/ic_launcher_foreground"
         android:fillType="evenOdd"
-        android:pathData="M27.35,51.35 a24,24 0 1 0 48,0 a24,24 0 1 0 -48,0 Z M44.15,44.15 H58.35 A2.8,2.8 0 0 1 61.15,46.95 A2.8,2.8 0 0 1 58.35,49.75 H44.15 A2.8,2.8 0 0 1 41.35,46.95 A2.8,2.8 0 0 1 44.15,44.15 Z M44.15,55.75 H49.35 A2.8,2.8 0 0 1 52.15,58.55 A2.8,2.8 0 0 1 49.35,61.35 H44.15 A2.8,2.8 0 0 1 41.35,58.55 A2.8,2.8 0 0 1 44.15,55.75 Z" />
+        android:pathData="M33.5,51.5 a19,19 0 1 0 38,0 a19,19 0 1 0 -38,0 Z M40.5,51.5 a12,12 0 1 0 24,0 a12,12 0 1 0 -24,0 Z" />
+
+    <!-- 字母 A：两腿 + 横杠（圆头，腿端与镜环相融） -->
+    <path
+        android:pathData="M52.5,45.5 L46.3,59.5 M52.5,45.5 L58.7,59.5 M47.8,55.5 L57.2,55.5"
+        android:strokeColor="@color/ic_launcher_foreground"
+        android:strokeLineCap="round"
+        android:strokeWidth="5.2" />
 </vector>
