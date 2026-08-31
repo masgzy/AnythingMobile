@@ -28,6 +28,12 @@
             </intent-filter>
         </activity>
 
+        <!-- 崩溃报告页：独立进程运行，主进程 OOM 崩溃时也能展示/分享日志 -->
+        <activity
+            android:name=".crash.CrashReportActivity"
+            android:exported="false"
+            android:process=":crash" />
+
         <!-- 下拉快捷设置磁贴：一键进入搜索（对标原版 QuickStartTileService） -->
         <service
             android:name=".tile.QuickSearchTileService"

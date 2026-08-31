@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build:
-    name: 引擎测试 + AAR + 多ABI APK
+    name: 引擎测试 + AAR + 多ABI 签名 APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -47,17 +47,52 @@ jobs:
           chmod +x build-aar.sh
           ./build-aar.sh
 
-      - name: 生成 Gradle Wrapper 并构建 APK（多 ABI + universal）
+      # 自签证书由 repo Secrets 提供（KEYSTORE_BASE64/KEYSTORE_PASSWORD/
+      # KEY_ALIAS/KEY_PASSWORD），解码后生成 keystore.properties 供
+      # app/build.gradle.kts 读取并给 release APK 签名。
+      - name: 恢复签名证书（Secrets -> keystore.properties）
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          gradle wrapper --gradle-version 8.9
-          ./gradlew :app:assembleDebug --no-daemon
+          mkdir -p signing
+          echo "$KEYSTORE_BASE64" | base64 --decode > signing/anything-release.jks
+          # 用 echo 逐行生成而非 heredoc：heredoc 会继承 YAML 缩进，
+          # 前导空格会被 java.util.Properties 当作续行处理
+          {
+            echo "storeFile=signing/anything-release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > keystore.properties
+          echo "keystore.properties 已生成，证书指纹："
+          keytool -list -v -keystore signing/anything-release.jks \
+            -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" 2>/dev/null | grep SHA256 || true
 
-      - name: 产物清单
+      - name: 生成 Gradle Wrapper 并构建签名 APK（多 ABI + universal）
         run: |
-          ls -lh app/build/outputs/apk/debug/
+          gradle wrapper --gradle-version 9.7.1
+          ./gradlew :app:assembleRelease --no-daemon
+
+      - name: 产物清单（统一重命名为 AnythingMobile-<版本>-<abi>.apk）
+        run: |
           VERSION=$(sed -n 's/.*versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -1)
           echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
           cp app/libs/engine.aar "app/libs/AnythingMobile-engine-$VERSION.aar"
+          OUT=app/build/outputs/apk/release
+          mkdir -p "$OUT/renamed"
+          for f in "$OUT"/*.apk; do
+            case "$f" in
+              *arm64-v8a*)   ABI=arm64-v8a ;;
+              *armeabi-v7a*) ABI=armeabi-v7a ;;
+              *x86_64*)      ABI=x86_64 ;;
+              *)             ABI=universal ;;
+            esac
+            mv "$f" "$OUT/renamed/AnythingMobile-$VERSION-$ABI.apk"
+          done
+          ls -lh "$OUT/renamed"
 
       # upload-artifact v7 新能力：单文件直传（archive: false）。
       # 不打 zip 包，artifact 名 = 文件名，下载即得可安装的 APK 本体。
@@ -66,25 +101,25 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: app/build/outputs/apk/debug/AnythingMobile-*-arm64-v8a.apk
+          path: app/build/outputs/apk/release/renamed/AnythingMobile-*-arm64-v8a.apk
 
       - name: 上传 armeabi-v7a APK（直传）
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: app/build/outputs/apk/debug/AnythingMobile-*-armeabi-v7a.apk
+          path: app/build/outputs/apk/release/renamed/AnythingMobile-*-armeabi-v7a.apk
 
       - name: 上传 x86_64 APK（直传）
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: app/build/outputs/apk/debug/AnythingMobile-*-x86_64.apk
+          path: app/build/outputs/apk/release/renamed/AnythingMobile-*-x86_64.apk
 
       - name: 上传 universal APK（直传）
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: app/build/outputs/apk/debug/AnythingMobile-*-universal.apk
+          path: app/build/outputs/apk/release/renamed/AnythingMobile-*-universal.apk
 
       - name: 上传引擎 AAR（直传）
         uses: actions/upload-artifact@v7

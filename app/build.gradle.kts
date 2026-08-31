@@ -1,21 +1,27 @@
-import com.android.build.gradle.internal.api.BaseVariantOutputImpl
+import java.util.Properties
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// 签名信息（keystore.properties 不入库，由 CI 从 Secrets 生成）：
+//   storeFile / storePassword / keyAlias / keyPassword
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
     namespace = "com.masgzy.anything"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.masgzy.anything"
         minSdk = 24
-        targetSdk = 35
-        versionCode = 4
-        versionName = "1.0.0-alpha4"
+        targetSdk = 36
+        versionCode = 5
+        versionName = "1.0.0-alpha5"
     }
 
     // 按 ABI 拆分产物：三种单架构 APK + 一个 universal 通吃包。
@@ -29,17 +35,6 @@ android {
         }
     }
 
-    // 统一产物命名: AnythingMobile-<版本>-<abi|universal>.apk
-    // （配合 CI 的 upload-artifact v7 单文件直传，下载即是可安装的 APK 本体）
-    applicationVariants.all {
-        val vName = versionName
-        outputs.all {
-            val output = this as BaseVariantOutputImpl
-            val abi = output.getFilter("ABI") ?: "universal"
-            output.outputFileName = "AnythingMobile-$vName-$abi.apk"
-        }
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -47,14 +42,35 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // CI 从 Secrets 解码证书并生成 keystore.properties 后自动签名；
+            // 本地无该文件时退回未签名 release（不影响 debug 开发）。
+            if (keystoreProps.isNotEmpty()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
+
+    signingConfigs {
+        if (keystoreProps.isNotEmpty()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
+    // AGP 9 内置 Kotlin：android.kotlinOptions{} 已移除，
+    // 按官方迁移指南改用 kotlin.compilerOptions{}（jvmTarget 需与 Java 一致）。
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
     buildFeatures {
         compose = true
@@ -66,7 +82,8 @@ dependencies {
     // 本地开发请先执行仓库根目录的 ./build-aar.sh
     implementation(files("libs/engine.aar"))
 
-    val composeBom = platform("androidx.compose:compose-bom:2024.09.02")
+    // Compose（BOM 2026.08.00：ui/foundation 1.12.0、material3 1.4.0、icons 1.7.8）
+    val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
@@ -76,8 +93,15 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
-    implementation("androidx.activity:activity-compose:1.9.2")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
-    implementation("androidx.core:core-ktx:1.13.1")
+    // material-kolor：ImageToolbox 同款取色引擎（HCT/DynamicScheme/PaletteStyle）。
+    // 5.0.1 = ImageToolbox 所用 5.0.0 的最新补丁版。
+    // 注意：其 Android 变体不传递任何依赖（KMP module 元数据为空），
+    // Hct/TonalPalette/DynamicScheme 所在的 material-color-utilities 必须显式引入。
+    implementation("com.materialkolor:material-kolor:5.0.1")
+    implementation("com.materialkolor:material-color-utilities:5.0.1")
+
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    implementation("androidx.core:core-ktx:1.19.0")
 }

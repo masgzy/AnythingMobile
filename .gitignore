@@ -19,3 +19,9 @@ core/coverage.out
 
 # 系统
 .DS_Store
+
+# 签名（证书与口令绝不入库，仅存在于 GitHub Secrets 与本地）
+keystore.properties
+signing/
+*.jks
+*.keystore

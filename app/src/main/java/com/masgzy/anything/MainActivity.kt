@@ -14,7 +14,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -22,7 +25,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.masgzy.anything.crash.CrashReporter
 import com.masgzy.anything.ui.AboutScreen
 import com.masgzy.anything.ui.ROUTE_ABOUT
 import com.masgzy.anything.ui.ROUTE_SETTINGS
@@ -53,6 +58,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 全局崩溃处理器必须最先安装（ImageToolbox GlobalExceptionHandler 同款模式）
+        CrashReporter.install(applicationContext)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
@@ -72,6 +79,33 @@ private fun Root(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     AnythingTheme(settings = settings) {
         AppNav(viewModel, onRequestAllFiles)
+    }
+    // 上一次崩溃未分享的报告：启动时提示用户分享（崩溃页拉起失败时的兜底入口）
+    val activityContext = LocalContext.current as? android.app.Activity
+    var pendingCrash by remember {
+        mutableStateOf(
+            activityContext != null && CrashReporter.hasPendingReport(activityContext),
+        )
+    }
+    if (pendingCrash && activityContext != null) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("检测到上次崩溃") },
+            text = { Text("上次运行发生异常，是否分享崩溃日志帮助修复？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    CrashReporter.shareReport(activityContext)
+                    CrashReporter.clear(activityContext)
+                    pendingCrash = false
+                }) { Text("分享日志") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    CrashReporter.clear(activityContext)
+                    pendingCrash = false
+                }) { Text("忽略") }
+            },
+        )
     }
 }
 

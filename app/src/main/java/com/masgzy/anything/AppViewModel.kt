@@ -69,9 +69,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         settingsRepo.run {
             setThemeMode(next.themeMode)
             setDynamicColor(next.dynamicColor)
-            setSeedColor(next.seedColor)
-            setAdvancedPalette(next.advancedPalette)
             setRoleColors(next.roleColors)
+            setPaletteStyle(next.paletteStyle)
+            setThemeContrast(next.themeContrast)
+            setInvertColors(next.invertColors)
             setAmoled(next.amoled)
             setAutoScanOnEnter(next.autoScanOnEnter)
             setSortByName(next.sortByName)

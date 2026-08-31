@@ -32,8 +32,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Colorize
+import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.InvertColors
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.RestartAlt
@@ -50,6 +53,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -76,10 +80,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.masgzy.anything.AppViewModel
 import com.masgzy.anything.data.PalettePreset
 import com.masgzy.anything.data.RoleColors
-import com.masgzy.anything.data.RolePalette
 import com.masgzy.anything.data.ScanPhase
-import com.masgzy.anything.data.SeedPalette
 import com.masgzy.anything.data.ThemeMode
+import com.masgzy.anything.ui.theme.ColorTupleDefaults
+import com.masgzy.anything.ui.theme.PaletteStyle
 
 /**
  * 设置页 —— 视觉对齐 ImageToolbox：每个设置项都是独立圆角卡片
@@ -104,6 +108,7 @@ fun SettingsScreen(
 
     var showThemeModeDialog by remember { mutableStateOf(false) }
     var showPaletteSheet by remember { mutableStateOf(false) }
+    var showStyleDialog by remember { mutableStateOf(false) }
     var showSortDialog by remember { mutableStateOf(false) }
 
     val modeLabel = when (settings.themeMode) {
@@ -260,7 +265,7 @@ fun SettingsScreen(
             PreferenceCard(
                 icon = Icons.Filled.Info,
                 title = "版本",
-                subtitle = "1.0.0-alpha4 · Apache-2.0",
+                subtitle = "1.0.0-alpha5 · Apache-2.0",
             )
         }
     }
@@ -286,29 +291,75 @@ fun SettingsScreen(
     if (showPaletteSheet) {
         PaletteSheet(
             current = settings.roleColors,
+            style = settings.paletteStyle,
+            contrast = settings.themeContrast,
+            invertColors = settings.invertColors,
+            dynamicColorOn = settings.dynamicColor,
             onSelectPreset = { preset ->
                 viewModel.updateSettings { s ->
                     s.copy(
                         roleColors = preset.roles,
-                        advancedPalette = true,
                         dynamicColor = false,
                     )
                 }
             },
             onEditRole = { roles ->
                 viewModel.updateSettings { s ->
-                    s.copy(roleColors = roles, advancedPalette = true, dynamicColor = false)
+                    s.copy(roleColors = roles, dynamicColor = false)
+                }
+            },
+            onStyleChange = { style ->
+                viewModel.updateSettings { s ->
+                    s.copy(paletteStyle = style, dynamicColor = false)
+                }
+            },
+            onOpenStylePicker = { showStyleDialog = true },
+            onContrastChange = { value ->
+                viewModel.updateSettings { s ->
+                    s.copy(themeContrast = value, dynamicColor = false)
+                }
+            },
+            onInvertColorsChange = { enabled ->
+                viewModel.updateSettings { s ->
+                    s.copy(invertColors = enabled, dynamicColor = false)
                 }
             },
             onReset = {
                 viewModel.updateSettings { s ->
                     s.copy(
-                        roleColors = RolePalette.DEFAULT_ROLES,
-                        advancedPalette = false,
+                        roleColors = ColorTupleDefaults.defaultRoles,
+                        paletteStyle = PaletteStyle.TonalSpot,
+                        themeContrast = 0f,
+                        invertColors = false,
                     )
                 }
             },
             onDismiss = { showPaletteSheet = false },
+        )
+    }
+
+    // ---- 调色板风格选择 ----
+    if (showStyleDialog) {
+        OptionsDialog(
+            title = "调色板风格",
+            options = listOf(
+                PaletteStyle.TonalSpot to "色调斑点 · 默认",
+                PaletteStyle.Neutral to "中性",
+                PaletteStyle.Vibrant to "鲜艳",
+                PaletteStyle.Expressive to "表现力",
+                PaletteStyle.Rainbow to "彩虹",
+                PaletteStyle.FruitSalad to "水果沙拉",
+                PaletteStyle.Monochrome to "单色",
+                PaletteStyle.Fidelity to "保真",
+                PaletteStyle.Content to "内容",
+            ),
+            selected = settings.paletteStyle,
+            onSelect = { style ->
+                viewModel.updateSettings { s ->
+                    s.copy(paletteStyle = style, dynamicColor = false)
+                }
+            },
+            onDismiss = { showStyleDialog = false },
         )
     }
 
@@ -327,15 +378,28 @@ fun SettingsScreen(
 }
 
 /** 配色方案卡片的副标题：说明当前外观来源（动态取色/预设/自定义）。 */
-private fun paletteSubtitle(settings: com.masgzy.anything.data.AppSettings, monet: Boolean): String =
-    when {
+private fun paletteSubtitle(settings: com.masgzy.anything.data.AppSettings, monet: Boolean): String {
+    val presetName = ColorTupleDefaults.presets
+        .firstOrNull { it.second == settings.roleColors }?.first
+    return when {
         settings.dynamicColor && monet ->
             "应用程序的主题将基于选择的颜色（当前为动态取色）"
-        settings.advancedPalette ->
-            RolePalette.matchPreset(settings.roleColors)?.name ?: "自定义角色配色"
-        else ->
-            "应用程序的主题将基于选择的颜色 · ${SeedPalette.nameOf(settings.seedColor)}"
+        presetName != null -> presetName
+        else -> "自定义角色配色 · ${styleLabel(settings.paletteStyle)}"
     }
+}
+
+private fun styleLabel(style: PaletteStyle): String = when (style) {
+    PaletteStyle.TonalSpot -> "色调斑点"
+    PaletteStyle.Neutral -> "中性"
+    PaletteStyle.Vibrant -> "鲜艳"
+    PaletteStyle.Expressive -> "表现力"
+    PaletteStyle.Rainbow -> "彩虹"
+    PaletteStyle.FruitSalad -> "水果沙拉"
+    PaletteStyle.Monochrome -> "单色"
+    PaletteStyle.Fidelity -> "保真"
+    PaletteStyle.Content -> "内容"
+}
 
 // ---- 通用组件 ----
 
@@ -488,16 +552,26 @@ private val roleDefs = listOf(
 
 /**
  * 配色方案底部弹层（对齐 ImageToolbox 配色方案界面）：
+ *  - 调色板风格（9 种）/ 反转颜色 / 对比度（-1..1）三行；
  *  - "简单变体"预设横排（三分色圆片，点选整套应用）；
  *  - 六个角色逐一展开编辑：SV 取色区 + 色相滑条 + #RRGGBB 输入；
- *  - 所有改动即时生效（实时预览），"保存"即关闭，"恢复默认"回到种子色方案。
+ *  - 所有改动即时生效（实时预览），"保存"即关闭，"恢复默认"回到原版颜色；
+ *  - 动态取色（Monet）开启时以上选项不生效，置灰并提示。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PaletteSheet(
     current: RoleColors,
+    style: PaletteStyle,
+    contrast: Float,
+    invertColors: Boolean,
+    dynamicColorOn: Boolean,
     onSelectPreset: (PalettePreset) -> Unit,
     onEditRole: (RoleColors) -> Unit,
+    onStyleChange: (PaletteStyle) -> Unit,
+    onContrastChange: (Float) -> Unit,
+    onInvertColorsChange: (Boolean) -> Unit,
+    onOpenStylePicker: () -> Unit,
     onReset: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -505,6 +579,8 @@ private fun PaletteSheet(
     var roles by remember { mutableStateOf(current) }
     var expandedRole by remember { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val selectedPresetName = ColorTupleDefaults.presets
+        .firstOrNull { it.second == roles }?.first
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -537,6 +613,48 @@ private fun PaletteSheet(
                 )
             }
 
+            if (dynamicColorOn) {
+                Text(
+                    "当前使用动态取色（壁纸颜色），以下选项需先关闭动态取色",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            // 调色板风格（ImageToolbox 配色方案弹窗同款选项）
+            SheetActionRow(
+                icon = Icons.Filled.Colorize,
+                title = "调色板风格",
+                subtitle = styleLabel(style),
+                enabled = !dynamicColorOn,
+                onClick = onOpenStylePicker,
+            )
+
+            // 反转颜色
+            SheetActionRow(
+                icon = Icons.Filled.InvertColors,
+                title = "反转颜色",
+                subtitle = "反转配色方案的所有颜色",
+                enabled = !dynamicColorOn,
+                onClick = { onInvertColorsChange(!invertColors) },
+                trailing = {
+                    Switch(
+                        checked = invertColors,
+                        onCheckedChange = { onInvertColorsChange(it) },
+                        enabled = !dynamicColorOn,
+                    )
+                },
+            )
+
+            // 对比度
+            SheetSliderRow(
+                icon = Icons.Filled.Contrast,
+                title = "对比度",
+                value = contrast,
+                enabled = !dynamicColorOn,
+                onValueChangeFinished = onContrastChange,
+            )
+
             // 简单变体
             Text(
                 "简单变体",
@@ -544,14 +662,15 @@ private fun PaletteSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                items(RolePalette.presets) { preset ->
+                items(ColorTupleDefaults.presets, key = { it.first }) { (name, presetRoles) ->
                     PresetChip(
-                        preset = preset,
-                        selected = RolePalette.matchPreset(roles) == preset,
+                        name = name,
+                        roles = presetRoles,
+                        selected = selectedPresetName == name,
                         onClick = {
-                            roles = preset.roles
+                            roles = presetRoles
                             expandedRole = null
-                            onSelectPreset(preset)
+                            onSelectPreset(PalettePreset(name, presetRoles))
                         },
                     )
                 }
@@ -584,7 +703,7 @@ private fun PaletteSheet(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 TextButton(onClick = {
-                    roles = RolePalette.DEFAULT_ROLES
+                    roles = ColorTupleDefaults.defaultRoles
                     expandedRole = null
                     onReset()
                 }) {
@@ -599,10 +718,92 @@ private fun PaletteSheet(
     }
 }
 
+/** 弹层内通用设置行：左侧图标 + 标题/副标题 + 右侧控件。 */
+@Composable
+private fun SheetActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    val shape = RoundedCornerShape(16.dp)
+    Surface(
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .clickable(enabled = enabled, onClick = onClick),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.alpha(if (enabled) 1f else 0.5f)) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.alpha(if (enabled) 1f else 0.5f),
+                )
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.alpha(if (enabled) 1f else 0.5f),
+                )
+            }
+            trailing?.invoke()
+        }
+    }
+}
+
+/** 对比度滑条行（-1..1，步进 0.01，与 ImageToolbox 一致；松手才提交）。 */
+@Composable
+private fun SheetSliderRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    value: Float,
+    enabled: Boolean,
+    onValueChangeFinished: (Float) -> Unit,
+) {
+    var draft by remember(value) { mutableStateOf(value) }
+    SheetActionRow(
+        icon = icon,
+        title = title,
+        subtitle = String.format("%.2f", draft),
+        enabled = enabled,
+        onClick = {},
+        trailing = {
+            Slider(
+                value = draft,
+                onValueChange = { draft = it },
+                valueRange = -1f..1f,
+                steps = 198,
+                enabled = enabled,
+                onValueChangeFinished = { onValueChangeFinished(draft) },
+                modifier = Modifier.width(140.dp),
+            )
+        },
+    )
+}
+
 /** "简单变体"预设圆片：主/辅/第三三色扇区（对齐 ImageToolbox 花瓣色板）。 */
 @Composable
 private fun PresetChip(
-    preset: PalettePreset,
+    name: String,
+    roles: RoleColors,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
@@ -615,15 +816,15 @@ private fun PresetChip(
     ) {
         Canvas(Modifier.fillMaxSize()) {
             drawArc(
-                color = Color(preset.roles.primary),
+                color = Color(roles.primary),
                 startAngle = -90f, sweepAngle = 180f, useCenter = true,
             )
             drawArc(
-                color = Color(preset.roles.secondary),
+                color = Color(roles.secondary),
                 startAngle = 90f, sweepAngle = 90f, useCenter = true,
             )
             drawArc(
-                color = Color(preset.roles.tertiary),
+                color = Color(roles.tertiary),
                 startAngle = 180f, sweepAngle = 90f, useCenter = true,
             )
         }
@@ -639,8 +840,8 @@ private fun PresetChip(
         )
         if (selected) {
             val checkTint =
-                if (Color(preset.roles.primary).luminance() > 0.5f) Color.Black else Color.White
-            Icon(Icons.Filled.Check, contentDescription = "已选中", tint = checkTint)
+                if (Color(roles.primary).luminance() > 0.5f) Color.Black else Color.White
+            Icon(Icons.Filled.Check, contentDescription = "已选中 $name", tint = checkTint)
         }
     }
 }
