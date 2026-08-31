@@ -500,6 +500,7 @@ private fun FilterPanel(
             Spacer(Modifier.height(12.dp))
             FilterButton(
                 icon = Icons.Filled.FilterList,
+                selected = false,
                 size = 44.dp,
                 onClick = onToggleSort,
             )
