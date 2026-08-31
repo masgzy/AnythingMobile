@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  AnythingMobile 启动图标前景 —— 第五轮「Windows 空文件 + 右下角放大镜」(用户指定构图):
-  实心纸剪影(27x35, 圆角 3.5) + 右上 Windows 折角(切口 9 + 切口内悬浮小三角 5.6,
-  与斜边垂直缝 2.4) + 右下角放大镜骑角(环 r11/宽 4.6, 与纸间 2.4 透底间隙 =
-  纸张 r15.7 正圆咬口; 45° 圆头柄)。
-  ImageToolbox 语言: 浅同色系底 + 深色实心剪影 + 负空间; 铁律: 结构实心、
-  负空间切口全圆润、可见区留白约 13 单位、单一焦点(放大镜)。
-  镜片孔与折角缝均为真实透底 → monochrome 主题图标直接共用本矢量。
+  AnythingMobile 启动图标前景 —— 第六轮「放大镜 + ANY 字标」(用户指定构图):
+  放大镜偏上, 占内容高约 74%(66dp 安全区内的极限), 下方 20% 放 ANY 字标;
+  镜环中线 r19/描边 5.5 圆心(52,43), 45° 圆头柄 (65.44,56.44)->(75.33,66.33);
+  字标 = vivo Sans Global Heavy 字形轮廓转路径(大写字高 8, 基线 84.5, 总宽 24.5, 字距 0.05em)。
+  字体来源: vivo 开发者平台官方发布包 (developersstatic.vivo.com, 20241022);
+  《vivo Sans 字体知识产权许可协议》2.3 条允许以其创作 logo/应用并分发 —— 本文件仅嵌入
+  轮廓路径、不分发字体文件, 属合规作品; 依 2.1 条在此注明使用了 vivo Sans 字体。
+  ImageToolbox 语言: 浅靛底 + 深靛实心剪影 + 负空间; 镜内透底, monochrome 直接共用本矢量。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -14,26 +15,21 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- 纸张: 顶边 → 折角斜切 → 右短边 → r15.7 圆弧咬口(镜片透底) → 底边 → 左侧圆角回路 -->
-    <path
-        android:fillColor="@color/ic_launcher_foreground"
-        android:pathData="M37.03,30.53 H51.53 L60.53,39.53 V45.53 A15.7,15.7 0 0 0 42.99,65.53 H37.03 A3.5,3.5 0 0 1 33.53,62.03 V34.03 A3.5,3.5 0 0 1 37.03,30.53 Z" />
-
-    <!-- 折角小三角: 悬浮于切口透底区内、贴原始角点 -->
-    <path
-        android:fillColor="@color/ic_launcher_foreground"
-        android:pathData="M54.92,30.53 H60.53 V36.13 Z" />
-
     <!-- 镜环(描边圆) -->
     <path
-        android:pathData="M47.03,61.03 a11,11 0 1 0 22,0 a11,11 0 1 0 -22,0 Z"
+        android:pathData="M33,43 a19,19 0 1 0 38,0 a19,19 0 1 0 -38,0 Z"
         android:strokeColor="@color/ic_launcher_foreground"
-        android:strokeWidth="4.6" />
+        android:strokeWidth="5.5" />
 
     <!-- 45° 圆头镜柄 -->
     <path
-        android:pathData="M65.81,68.81 L72.17,75.17"
+        android:pathData="M65.44,56.44 L75.33,66.33"
         android:strokeColor="@color/ic_launcher_foreground"
-        android:strokeWidth="4.6"
+        android:strokeWidth="5.5"
         android:strokeLineCap="round" />
+
+    <!-- ANY 字标(vivo Sans Global Heavy 轮廓) -->
+    <path
+        android:fillColor="@color/ic_launcher_foreground"
+        android:pathData="M41.86,84.87L44.52,77.45H46.78L49.42 84.87H47.49L46.96 83.22H44.29L43.79 84.87ZM46.48 81.77Q46.19 80.89 46.03 80.36Q45.86 79.82 45.63 78.91H45.57Q45.27 80.04 44.8 81.54L44.73 81.77ZM50.82 77.45H52.31L54.56 80.31Q55.06 80.92 55.29 81.23Q55.53 81.55 55.82 82H55.83Q55.8 81.19 55.8 80.15V77.45H57.59V84.87H56.05L54.2 82.57Q53.66 81.89 53.36 81.48Q53.07 81.08 52.62 80.42H52.6Q52.61 81.07 52.61 82.4V84.87H50.82ZM66.15,77.45L63.46,82.37H63.45V84.87H61.66V82.35L58.96 77.45H61.11L61.99 79.24Q62.26 79.83 62.64 80.74H62.68L62.87 80.31Q63.11 79.74 63.35 79.24L64.2 77.45Z" />
 </vector>
