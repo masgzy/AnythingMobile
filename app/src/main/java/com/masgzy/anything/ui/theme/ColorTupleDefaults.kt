@@ -8,6 +8,7 @@
 package com.masgzy.anything.ui.theme
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import com.masgzy.anything.data.RoleColors
 
 object ColorTupleDefaults {

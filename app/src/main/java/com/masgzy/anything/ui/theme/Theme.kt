@@ -5,6 +5,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import com.masgzy.anything.data.AppSettings
 import com.masgzy.anything.data.RoleColors
@@ -41,7 +42,9 @@ fun AnythingTheme(
         ThemeMode.DARK -> true
     }
     val context = LocalContext.current
-    val colorScheme = remember(settings, dark) {
+    // 方案计算不参与重组密集路径（remember 缓存），
+    // animateAllColors 是 @Composable 扩展，必须在 remember 之外调用
+    val base = remember(settings, dark) {
         context.getColorScheme(
             isDarkTheme = dark,
             amoledMode = settings.amoled,
@@ -50,7 +53,8 @@ fun AnythingTheme(
             contrastLevel = settings.themeContrast.toDouble(),
             dynamicColor = settings.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
             isInvertColors = settings.invertColors,
-        ).animateAllColors()
+        )
     }
+    val colorScheme = base.animateAllColors()
     MaterialTheme(colorScheme = colorScheme, content = content)
 }
