@@ -2,6 +2,7 @@ package core
 
 import (
         "bytes"
+        "compress/gzip"
         "encoding/gob"
         "encoding/json"
         "os"
@@ -269,8 +270,7 @@ func waitForSnapshotContent(t *testing.T, dataDir, wantPath string) {
         for time.Now().Before(deadline) {
                 data, err := os.ReadFile(final)
                 if err == nil {
-                        var snap snapshot
-                        if decErr := gob.NewDecoder(bytes.NewReader(data)).Decode(&snap); decErr == nil {
+                        if snap, decErr := decodeSnapshot(data); decErr == nil {
                                 for _, c := range snap.Contents {
                                         if c.Path == wantPath {
                                                 return
@@ -281,6 +281,21 @@ func waitForSnapshotContent(t *testing.T, dataDir, wantPath string) {
                 time.Sleep(20 * time.Millisecond)
         }
         t.Fatalf("含 %s 的快照未在限时内落盘", wantPath)
+}
+
+// decodeSnapshot 解码快照字节（v2: gzip+gob；兼容 v1: 纯 gob）。
+func decodeSnapshot(data []byte) (snapshot, error) {
+        var snap snapshot
+        if zr, err := gzip.NewReader(bytes.NewReader(data)); err == nil {
+                if err := gob.NewDecoder(zr).Decode(&snap); err != nil {
+                        return snapshot{}, err
+                }
+                return snap, nil
+        }
+        if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&snap); err != nil {
+                return snapshot{}, err
+        }
+        return snap, nil
 }
 
 // TestEnginePersistence 验证索引磁盘持久化：

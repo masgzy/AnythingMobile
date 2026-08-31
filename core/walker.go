@@ -7,7 +7,6 @@ import (
         "path/filepath"
         "strings"
         "sync"
-        "sync/atomic"
 )
 
 // maxParseSize 单个文档参与全文解析的大小上限（20MB）。
@@ -30,22 +29,27 @@ var docExts = map[string]bool{
         ".pdf": true,
 }
 
-// traverse 并发遍历 roots：每个 root 的第一层子目录作为一个独立子树，
-// 由 workers 上限的 goroutine 池并行 WalkDir。返回是否被用户取消。
+// traverse 并发遍历 roots（v0.4：全深度并行）。
+//
+// 工作模型：共享目录队列 + workers 个工作协程。协程拾取目录后顺序处理
+// 其条目（文件：入索引/增量比对；子目录：压回队列供其他协程拾取），
+// 因此任意深度都保持 workers 路并行。移动存储经由 FUSE 访问，每次
+// lstat 都有可观延迟 —— 旧实现只有根的第一层子树并行、子树内部串行，
+// 大子树（如微信目录）独占单线程成为瓶颈；全深度并行可把该延迟
+// 摊薄到每一路，"进入应用增量重扫一闪而过"由此达成。
+//
+// 终止条件：队列空且无在处理目录（全部完成），或被取消/内部错误。
 //
 // incremental=true 时执行"进入应用自动增量重扫"：
-//   - 名称与 size/mtime 均未变化的文件只计数，不重建索引、不重新解析文档，
-//     因此未变动时整个过程只做 stat，秒级完成；
+//   - 名称与 size/mtime 均未变化的文件只计数，不重建索引、不重新解析文档；
 //   - 目录条目同步收集到目录名索引；
 //   - 遍历结束后由 StartScan 的收尾逻辑移除已消失的条目。
 //
 // 依据 Android 官方文档，即使持有 MANAGE_EXTERNAL_STORAGE，
 // 其他应用的 Android/{data,obb} 目录依然不可访问，因此直接跳过。
 func (e *Engine) traverse(roots []string, incremental bool) bool {
-        sem := make(chan struct{}, e.workers)
-        var wg sync.WaitGroup
-        cancelled := atomic.Bool{}
-
+        w := &dirWalker{e: e, incremental: incremental}
+        w.cond = sync.NewCond(&w.mu)
         for _, root := range roots {
                 // root 本身可能是文件
                 if info, err := os.Stat(root); err == nil && !info.IsDir() {
@@ -58,84 +62,141 @@ func (e *Engine) traverse(roots []string, incremental bool) bool {
                         }
                         continue
                 }
-                children, err := os.ReadDir(root)
-                if err != nil {
-                        e.notifyError("scan", "无法读取目录 "+root+": "+err.Error())
-                        continue
-                }
-                if incremental {
-                        e.recordSeen(root)
-                }
-                e.addDir(root)
-                for _, child := range children {
-                        if e.cancel.Load() {
-                                break
-                        }
-                        sub := filepath.Join(root, child.Name())
-                        if !child.IsDir() {
-                                if info, err := child.Info(); err == nil && !strings.HasPrefix(child.Name(), ".") {
-                                        if incremental {
-                                                e.recordSeen(sub)
-                                        }
-                                        e.handleFile(sub, info, incremental)
-                                        e.files.Add(1)
-                                }
-                                continue
-                        }
-                        sem <- struct{}{}
-                        wg.Add(1)
-                        go func(dir string) {
-                                defer wg.Done()
-                                defer func() { <-sem }()
-                                e.walkSubtree(dir, &cancelled, incremental)
-                        }(sub)
-                }
+                w.push(root)
         }
-        wg.Wait()
-        return cancelled.Load() || e.cancel.Load()
+        w.run(e.workers)
+        return e.cancel.Load()
 }
 
-// walkSubtree 遍历单个子树。
-func (e *Engine) walkSubtree(dir string, cancelled *atomic.Bool, incremental bool) {
-        filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-                if cancelled.Load() || e.cancel.Load() {
-                        return fs.SkipAll
+// dirWalker 全深度并行遍历器：目录任务队列 + 固定worker池。
+// pending = 队列中 + 正在处理的目录总数；pending 归零即遍历完成。
+type dirWalker struct {
+        e           *Engine
+        incremental bool
+
+        mu      sync.Mutex
+        cond    *sync.Cond
+        queue   []string
+        pending int
+        stopped bool // 取消或内部错误后，所有协程不再拾取新任务
+}
+
+// push 入队一个待遍历目录。
+func (w *dirWalker) push(dir string) {
+        w.mu.Lock()
+        w.queue = append(w.queue, dir)
+        w.pending++
+        w.cond.Signal()
+        w.mu.Unlock()
+}
+
+// stop 请求全部协程停止拾取（取消/内部错误时调用）。
+func (w *dirWalker) stop() {
+        w.mu.Lock()
+        w.stopped = true
+        w.cond.Broadcast()
+        w.mu.Unlock()
+}
+
+// run 启动 worker 池并阻塞至遍历结束。
+func (w *dirWalker) run(workers int) {
+        if workers < 1 {
+                workers = 1
+        }
+        var wg sync.WaitGroup
+        for i := 0; i < workers; i++ {
+                wg.Add(1)
+                go func() {
+                        defer wg.Done()
+                        w.worker()
+                }()
+        }
+        wg.Wait()
+}
+
+// worker 单个遍历协程：拾取目录 → 处理 → 计数，直到队列空且无在处理目录。
+func (w *dirWalker) worker() {
+        for {
+                w.mu.Lock()
+                for len(w.queue) == 0 && w.pending > 0 && !w.stopped {
+                        w.cond.Wait()
                 }
-                if err != nil {
-                        // 无权限等情况：跳过该条目，不中断整体扫描
-                        if d != nil && d.IsDir() {
-                                return fs.SkipDir
-                        }
-                        return nil
+                if len(w.queue) == 0 || w.stopped {
+                        w.mu.Unlock()
+                        return
                 }
-                name := d.Name()
-                if d.IsDir() {
-                        if filterDir(path, name) {
-                                return fs.SkipDir
+                dir := w.queue[0]
+                w.queue = w.queue[1:]
+                w.mu.Unlock()
+
+                if w.e.cancel.Load() {
+                        w.stop()
+                        return
+                }
+
+                // walkDir 的未预期异常只终结本次遍历并上报，
+                // 绝不让 panic 存活（gobind 约束：panic 跨界即进程退出）。
+                func() {
+                        defer func() {
+                                if r := recover(); r != nil {
+                                        w.e.notifyError("scan", fmt.Sprintf("遍历发生内部错误: %v", r))
+                                        w.stop()
+                                }
+                                w.mu.Lock()
+                                w.pending--
+                                if w.pending == 0 {
+                                        w.cond.Broadcast()
+                                }
+                                w.mu.Unlock()
+                        }()
+                        w.walkDir(dir)
+                }()
+        }
+}
+
+// walkDir 遍历单个目录：文件入索引/增量比对，子目录压回共享队列。
+func (w *dirWalker) walkDir(dir string) {
+        entries, err := os.ReadDir(dir)
+        if err != nil {
+                // 无权限等情况：跳过该目录，不中断整体扫描
+                w.e.notifyError("scan", "无法读取目录 "+dir+": "+err.Error())
+                return
+        }
+        e := w.e
+        if w.incremental {
+                e.recordSeen(dir)
+        }
+        e.addDir(dir)
+        for _, child := range entries {
+                if e.cancel.Load() {
+                        w.stop()
+                        return
+                }
+                name := child.Name()
+                sub := filepath.Join(dir, name)
+                if child.IsDir() {
+                        if filterDir(sub, name) {
+                                continue
                         }
-                        if incremental {
-                                e.recordSeen(path)
-                        }
-                        e.addDir(path)
-                        return nil
+                        w.push(sub)
+                        continue
                 }
                 if strings.HasPrefix(name, ".") {
-                        return nil
+                        continue
                 }
-                info, err := d.Info()
+                info, err := child.Info()
                 if err != nil {
-                        return nil
+                        return
                 }
-                e.handleFile(path, info, incremental)
-                if incremental {
-                        e.recordSeen(path)
+                e.handleFile(sub, info, w.incremental)
+                if w.incremental {
+                        e.recordSeen(sub)
                 }
                 n := e.files.Add(1)
                 if n%200 == 0 {
                         e.notifyProgress("scan", n)
                 }
-                return nil
-        })
+        }
 }
 
 // addDir 将目录加入目录名索引（供"目录名"页签搜索）。

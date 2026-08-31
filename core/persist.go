@@ -16,6 +16,7 @@ package core
 
 import (
         "bytes"
+        "compress/gzip"
         "encoding/gob"
         "errors"
         "os"
@@ -24,7 +25,10 @@ import (
         "time"
 )
 
-const snapshotVersion = 1
+// snapshotVersion v2：全文内容改用 gzip 压缩存储（文本压缩比约 4~6倍），
+// 低端机闪存上快照读写 IO 明显缩小；v1 为未压缩格式，加载时 gunzip
+// 失败即静默放弃并由全量扫描重建，无需迁移逻辑。
+const snapshotVersion = 2
 
 // nameRecord 名称索引（文件/目录通用）的持久化条目。
 type nameRecord struct {
@@ -53,8 +57,8 @@ func (e *Engine) snapshotPath() string {
         return filepath.Join(e.dataDir, "index.snap")
 }
 
-// saveSnapshot 将三张索引编码落盘。写入临时文件后原子重命名，
-// 任意时刻崩溃都不会破坏上一次的有效快照。
+// saveSnapshot 将三张索引编码落盘（gob + gzip）。
+// 写入临时文件后原子重命名，任意时刻崩溃都不会破坏上一次的有效快照。
 func (e *Engine) saveSnapshot() error {
         if e.dataDir == "" {
                 return errors.New("core: 未设置数据目录，无法保存索引")
@@ -72,7 +76,11 @@ func (e *Engine) saveSnapshot() error {
         }
 
         var buf bytes.Buffer
-        if err := gob.NewEncoder(&buf).Encode(snap); err != nil {
+        zw := gzip.NewWriter(&buf)
+        if err := gob.NewEncoder(zw).Encode(snap); err != nil {
+                return err
+        }
+        if err := zw.Close(); err != nil {
                 return err
         }
 
@@ -84,7 +92,8 @@ func (e *Engine) saveSnapshot() error {
 }
 
 // restoreSnapshot 从磁盘恢复索引（进程内只执行一次）。
-// 首次使用（无快照）与加载失败均静默返回，由后续全量扫描兜底。
+// 首次使用（无快照）、格式不符（v1 旧快照）与加载失败均静默返回，
+// 由后续全量扫描兜底。
 func (e *Engine) restoreSnapshot() {
         if e.dataDir == "" {
                 return
@@ -94,8 +103,12 @@ func (e *Engine) restoreSnapshot() {
                 if err != nil {
                         return // 无快照：首次使用
                 }
+                zr, err := gzip.NewReader(bytes.NewReader(data))
+                if err != nil {
+                        return // 非 gzip 格式（v1 旧快照）：放弃恢复
+                }
                 var snap snapshot
-                if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&snap); err != nil {
+                if err := gob.NewDecoder(zr).Decode(&snap); err != nil {
                         return // 损坏：放弃恢复
                 }
                 if snap.Version != snapshotVersion {

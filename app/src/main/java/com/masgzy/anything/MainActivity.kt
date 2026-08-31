@@ -8,11 +8,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.rememberDrawerState
@@ -94,10 +94,12 @@ private fun AppNav(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    // 设置/关于返回：回到主界面并重新打开侧边栏（用户从此处进入）
+    // 设置/关于返回：回到主界面并重新打开侧边栏（用户从此处进入）。
+    // 抽屉用 snapTo 瞬时打开而非动画展开：与路由转场同时进行的两段动画
+    // 会在中端机上掉帧（实测明显卡顿），瞬时展开则只余一段转场，观感干脆。
     val backToDrawer: () -> Unit = {
         route = "main"
-        scope.launch { drawerState.open() }
+        scope.launch { drawerState.snapTo(DrawerValue.Open) }
     }
 
     // 拦截系统返回键，与左上角返回箭头行为一致
@@ -108,18 +110,22 @@ private fun AppNav(
     AnimatedContent(
         targetState = route,
         transitionSpec = {
-            // 进入更深层级：新页从右滑入；返回：旧页向右滑出。
-            // 时长/缓动采用 M3 惯用的 FastOutSlowIn，观感顺滑不生硬。
+            // M3 fade-through 转场：旧页 60~90ms 快速淡出，新页延迟后
+            // 淡入并从 92% 轻微放大。相比旧的全宽滑动，缩放是纯
+            // graphicsLayer 变换、不触发重新测量，两块重组件同屏时的
+            // 开销大幅降低 —— 这是从设置返回主界面卡顿的根因。
             val goingDeeper = routeDepth(targetState) > routeDepth(initialState)
-            val enter = slideInHorizontally(
-                tween(320, easing = FastOutSlowInEasing),
-            ) { full -> if (goingDeeper) full else -full / 3 } +
-                fadeIn(tween(240))
-            val exit = slideOutHorizontally(
-                tween(260, easing = FastOutSlowInEasing),
-            ) { full -> if (goingDeeper) -full / 3 else full } +
-                fadeOut(tween(180))
-            enter togetherWith exit
+            if (goingDeeper) {
+                fadeIn(
+                    tween(210, delayMillis = 70, easing = LinearOutSlowInEasing),
+                ) + scaleIn(
+                    initialScale = 0.92f,
+                    animationSpec = tween(280, delayMillis = 70, easing = FastOutSlowInEasing),
+                ) togetherWith fadeOut(tween(70, easing = FastOutSlowInEasing))
+            } else {
+                fadeIn(tween(220, easing = LinearOutSlowInEasing)) togetherWith
+                    fadeOut(tween(90, easing = FastOutSlowInEasing))
+            }
         },
         label = "nav",
     ) { r ->

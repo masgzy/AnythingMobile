@@ -94,6 +94,7 @@ import com.masgzy.anything.AppViewModel
 import com.masgzy.anything.StoragePermissions
 import com.masgzy.anything.data.ScanPhase
 import com.masgzy.anything.data.UiHit
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** 主界面导航目标（抽屉菜单）。 */
@@ -163,6 +164,18 @@ fun SearchScreen(
             else -> "索引更新完成，没有文件变动"
         }
         snackbarHostState.showSnackbar(msg)
+    }
+
+    // "更新索引中"胶囊延迟显示：无变动时增量扫描瞬间完成，
+    // 提示一闪而过反而显得慢；超过 600ms 才出现，观感与原版一致。
+    var pillVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(repoState.phase) {
+        if (repoState.phase == ScanPhase.UPDATING) {
+            delay(600)
+            pillVisible = repoState.phase == ScanPhase.UPDATING
+        } else {
+            pillVisible = false
+        }
     }
 
     // 多选模式下拦截返回键
@@ -271,10 +284,10 @@ fun SearchScreen(
                     }
                 }
 
-                // 索引更新悬浮提示：悬浮于内容之上，不推挤布局，
-                // 出现/消失带滑入滑出动画（修复原横幅顶开页面的生硬感）
+                // 索引更新悬浮提示：悬浮于内容之上，不推挤布局；
+                // 延迟出现（见上方 pillVisible），出/入带滑入滑出动画
                 AnimatedVisibility(
-                    visible = repoState.phase == ScanPhase.UPDATING,
+                    visible = pillVisible,
                     enter = fadeIn(tween(200)) +
                         slideInVertically(tween(220, easing = FastOutSlowInEasing)) { -it },
                     exit = fadeOut(tween(200)) +

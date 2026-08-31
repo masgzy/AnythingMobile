@@ -18,7 +18,10 @@ import com.masgzy.anything.data.ThemeMode
  *
  *  - 主题模式：跟随系统 / 浅色 / 深色（AppSettings.themeMode）；
  *  - 动态取色（Monet）：Android 12+ 默认开启，跟随壁纸；
- *  - 预设主题色：关闭 Monet 或低版本系统时使用 AppSettings.seedColor；
+ *  - 角色化配色（advancedPalette）：ImageToolbox 配色方案，
+ *    主色/辅助色/第三色/表面/中性变体/错误六角色直接指定，
+ *    其余角色由各自色相 HSL 派生；
+ *  - 预设主题色：以上皆未启用时使用 AppSettings.seedColor；
  *  - AMOLED 纯黑：深色模式下 surface/background 置纯黑。
  */
 @Composable
@@ -36,6 +39,7 @@ fun AnythingTheme(
         when {
             settings.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
                 baselineDynamic(context, dark, settings.amoled)
+            settings.advancedPalette -> roleScheme(settings.roleColors, dark, settings.amoled)
             else ->
                 seedScheme(Color(settings.seedColor), dark, settings.amoled)
         }
@@ -113,6 +117,101 @@ private fun seedScheme(seed: Color, dark: Boolean, amoled: Boolean) =
                 surfaceContainerHigh = sl(0.92f, s * 0.15f),
                 outline = sl(0.50f, s * 0.2f),
                 outlineVariant = sl(0.82f, s * 0.15f),
+            )
+        }
+        if (amoled && dark) scheme.amoledized() else scheme
+    }
+
+/**
+ * 角色化配色方案（ImageToolbox 配色方案功能）：
+ *
+ * 用户直接指定的六个角色（主色/辅助色/第三色/表面/中性变体/错误）
+ * 在浅色模式下原样使用（on* 文字色按亮度自动黑/白保证对比），
+ * 深色模式下保持各自色相、按 M3 明暗层次重推亮度；
+ * 容器色、轮廓、表面容器等其余角色由对应角色的色相派生。
+ */
+private fun roleScheme(roles: com.masgzy.anything.data.RoleColors, dark: Boolean, amoled: Boolean) =
+    run {
+        // 每个角色的 HSL 分量（色相/饱和度保留，亮度按需重推）
+        val p = hslOf(roles.primary)
+        val s = hslOf(roles.secondary)
+        val t = hslOf(roles.tertiary)
+        val sf = hslOf(roles.surface)
+        val sv = hslOf(roles.surfaceVariant)
+        val er = hslOf(roles.error)
+
+        fun of(c: Triple<Float, Float, Float>, light: Float, satScale: Float = 1f): Color =
+            colorFromHsl(c.first, (c.second * satScale).coerceIn(0f, 1f), light.coerceIn(0f, 1f))
+
+        // on* 文字色：跟随所属角色色相，亮度按对比度要求固定
+        fun onOf(base: Int, darkOn: Boolean): Color {
+            val l = hslOf(base).third
+            return if (darkOn) {
+                if (l > 0.55f) Color.Black else Color.White
+            } else {
+                if (l > 0.55f) Color(0xFF1B1B1F) else Color.White
+            }
+        }
+
+        val scheme = if (dark) {
+            darkColorScheme(
+                primary = of(p, 0.80f),
+                onPrimary = of(p, 0.22f, 0.5f),
+                primaryContainer = of(p, 0.36f),
+                onPrimaryContainer = of(p, 0.90f),
+                secondary = of(s, 0.78f),
+                onSecondary = of(s, 0.20f),
+                secondaryContainer = of(s, 0.32f),
+                onSecondaryContainer = of(s, 0.90f),
+                tertiary = of(t, 0.80f),
+                onTertiary = of(t, 0.20f),
+                tertiaryContainer = of(t, 0.34f),
+                onTertiaryContainer = of(t, 0.90f),
+                error = of(er, 0.80f),
+                onError = of(er, 0.20f),
+                errorContainer = of(er, 0.30f),
+                onErrorContainer = of(er, 0.90f),
+                background = of(sf, 0.09f, 0.12f),
+                onBackground = of(sf, 0.92f, 0.10f),
+                surface = of(sf, 0.09f, 0.12f),
+                onSurface = of(sf, 0.92f, 0.10f),
+                surfaceVariant = of(sv, 0.16f),
+                onSurfaceVariant = of(sv, 0.80f),
+                surfaceContainer = of(sf, 0.12f, 0.15f),
+                surfaceContainerHigh = of(sf, 0.15f, 0.15f),
+                surfaceContainerHighest = of(sf, 0.19f, 0.15f),
+                outline = of(sv, 0.60f),
+                outlineVariant = of(sv, 0.30f, 0.15f),
+            )
+        } else {
+            lightColorScheme(
+                primary = Color(roles.primary),
+                onPrimary = onOf(roles.primary, darkOn = false),
+                primaryContainer = of(p, 0.90f),
+                onPrimaryContainer = of(p, 0.22f),
+                secondary = Color(roles.secondary),
+                onSecondary = onOf(roles.secondary, darkOn = false),
+                secondaryContainer = of(s, 0.88f),
+                onSecondaryContainer = of(s, 0.18f),
+                tertiary = Color(roles.tertiary),
+                onTertiary = onOf(roles.tertiary, darkOn = false),
+                tertiaryContainer = of(t, 0.88f),
+                onTertiaryContainer = of(t, 0.18f),
+                error = Color(roles.error),
+                onError = onOf(roles.error, darkOn = false),
+                errorContainer = of(er, 0.90f),
+                onErrorContainer = of(er, 0.18f),
+                background = Color(roles.surface),
+                onBackground = of(sf, 0.14f, 0.15f),
+                surface = Color(roles.surface),
+                onSurface = of(sf, 0.14f, 0.15f),
+                surfaceVariant = Color(roles.surfaceVariant),
+                onSurfaceVariant = of(sv, 0.32f),
+                surfaceContainer = of(sf, 0.95f, 0.15f),
+                surfaceContainerHigh = of(sf, 0.92f, 0.15f),
+                surfaceContainerHighest = of(sf, 0.89f, 0.15f),
+                outline = of(sv, 0.50f),
+                outlineVariant = of(sv, 0.82f, 0.15f),
             )
         }
         if (amoled && dark) scheme.amoledized() else scheme

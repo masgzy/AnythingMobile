@@ -70,6 +70,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             setThemeMode(next.themeMode)
             setDynamicColor(next.dynamicColor)
             setSeedColor(next.seedColor)
+            setAdvancedPalette(next.advancedPalette)
+            setRoleColors(next.roleColors)
             setAmoled(next.amoled)
             setAutoScanOnEnter(next.autoScanOnEnter)
             setSortByName(next.sortByName)
