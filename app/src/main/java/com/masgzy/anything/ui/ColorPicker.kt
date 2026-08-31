@@ -17,12 +17,12 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.IntSize
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 
@@ -155,12 +155,12 @@ fun HueSlider(
             .fillMaxWidth()
             .height(26.dp)
             .pointerInput(Unit) {
-                detectTapGestures { pos -> pick(pos.x, size.width) }
+                detectTapGestures { pos -> pick(pos.x, size.width.toFloat()) }
             }
             .pointerInput(Unit) {
                 detectDragGestures { change, _ ->
                     change.consume()
-                    pick(change.position.x, size.width)
+                    pick(change.position.x, size.width.toFloat())
                 }
             },
     ) {
