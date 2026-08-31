@@ -5,8 +5,10 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -32,7 +34,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Help
 import androidx.compose.material.icons.rounded.AllInclusive
-import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DoneAll
@@ -45,7 +46,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -74,7 +74,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -105,12 +107,10 @@ const val ROUTE_WELCOME = "welcome"
  * 长按多选删除、结果详情面板。
  *
  * 索引更新（对齐原版"融入顶部 UI"的做法）：进入应用自动增量扫描时，
- * 顶部搜索栏的占位文字直接替换为"更新索引中..."（无悬浮胶囊/无弹窗）；
- * 完成后同一位置短暂显示"索引更新完成"再自动还原。首次建索引仍为全屏遮罩。
+ * 页签行下方推入一条全宽浅黄横幅（原版同款配色）：扫描中显示"更新索引中..."，
+ * 完成后短暂显示"索引更新完成"再自动收起。无弹窗、无悬浮胶囊；
+ * 横幅在布局流内推挤内容，首次建索引仍为全屏遮罩。
  */
-/** 顶部搜索栏融入式状态提示（null = 常规搜索框）。 */
-private data class TopBarStatus(val text: String, val busy: Boolean)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
@@ -153,26 +153,24 @@ fun SearchScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // 顶部搜索栏融入式状态：扫描中 → "更新索引中..."；完成 → 短暂显示后自动还原。
-    // 与原版一致：提示即顶栏本身（占位文字替换），无悬浮胶囊、无 Snackbar。
-    var doneStatus by remember { mutableStateOf<TopBarStatus?>(null) }
+    // 索引状态横条（原版同款融入式，见文件头注释）：扫描中延迟 600ms 出现
+    // （增量扫描无变动时一闪而过反而吵），完成后短暂显示再自动收起。
+    var stripText by remember { mutableStateOf<String?>(null) }
     var shownSummary by remember { mutableStateOf<Any?>(null) }
     LaunchedEffect(repoState.lastSummary) {
         val s = repoState.lastSummary ?: return@LaunchedEffect
         // 避免从设置页返回等重组场景重复提示
         if (s == shownSummary) return@LaunchedEffect
         shownSummary = s
-        doneStatus = TopBarStatus(
-            if (s.cancelled) "索引更新已取消" else "索引更新完成",
-            busy = false,
-        )
+        stripText = if (s.cancelled) "索引更新已取消" else "索引更新完成"
         delay(2500)
-        doneStatus = null
+        stripText = null
     }
-    val barStatus = if (repoState.phase == ScanPhase.UPDATING) {
-        TopBarStatus("更新索引中...", busy = true)
-    } else {
-        doneStatus
+    LaunchedEffect(repoState.phase) {
+        if (repoState.phase == ScanPhase.UPDATING) {
+            delay(600)
+            if (repoState.phase == ScanPhase.UPDATING) stripText = "更新索引中..."
+        }
     }
 
     // 多选模式下拦截返回键
@@ -215,7 +213,6 @@ fun SearchScreen(
                             onOpenDrawer = {
                                 scope.launch { drawerState.open() }
                             },
-                            status = barStatus,
                         )
                     }
                 }
@@ -260,6 +257,15 @@ fun SearchScreen(
                         }
                     }
 
+                    // 索引状态横条（原版同款）：布局流内推挤内容，非悬浮层
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = stripText != null,
+                        enter = fadeIn(tween(180)) + expandVertically(tween(200)),
+                        exit = fadeOut(tween(220)) + shrinkVertically(tween(240)),
+                    ) {
+                        IndexStatusStrip(stripText.orEmpty())
+                    }
+
                     HorizontalPager(state = pagerState, modifier = Modifier.weight(1f)) { page ->
                         val filter = if (page == 0) nameFilter else officeFilter
                         HitListPage(
@@ -281,7 +287,7 @@ fun SearchScreen(
                     }
                 }
 
-                // 索引状态已融入顶栏搜索框（见 TopBarStatus），不再使用悬浮胶囊/Snackbar
+                // 索引状态走 Tab 行下方的原版同款横幅（见 IndexStatusStrip），无悬浮胶囊/Snackbar
 
                 // 底部筛选区（目录名页不显示，还原原版）
                 if (pagerState.currentPage != 2 && repoState.phase != ScanPhase.FIRST_BUILD) {
@@ -536,20 +542,13 @@ private fun FilterPanel(
     }
 }
 
-/**
- * 普通态顶栏：汉堡 + 状态/放大镜 + 搜索输入（原版样式，M3 配色）。
- *
- * status 非 null 时融入式提示：放大镜位置换成小圈进度（扫描中）或对勾（完成），
- * 占位文字换成状态文案 —— 提示即顶栏本身，无任何悬浮层；
- * 已输入查询时占位区被内容占据，状态自然让位给用户输入。
- */
+/** 普通态顶栏：汉堡 + 放大镜 + 搜索输入（原版样式，M3 配色）。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SearchTopBar(
     query: String,
     onQueryChange: (String) -> Unit,
     onOpenDrawer: () -> Unit,
-    status: TopBarStatus? = null,
 ) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
@@ -565,29 +564,7 @@ private fun SearchTopBar(
         },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                AnimatedContent(
-                    targetState = status,
-                    transitionSpec = {
-                        fadeIn(tween(180)) togetherWith fadeOut(tween(140))
-                    },
-                    label = "topStatusIcon",
-                ) { st ->
-                    when {
-                        st == null -> Icon(
-                            Icons.Rounded.Search, null,
-                            modifier = Modifier.size(22.dp),
-                        )
-                        st.busy -> CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
-                        else -> Icon(
-                            Icons.Rounded.CheckCircle, null,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
+                Icon(Icons.Rounded.Search, null, modifier = Modifier.size(22.dp))
                 Spacer(Modifier.width(10.dp))
                 BasicTextField(
                     value = query,
@@ -602,10 +579,9 @@ private fun SearchTopBar(
                         Box {
                             if (query.isEmpty()) {
                                 Text(
-                                    status?.text ?: "请输入查询关键词",
+                                    "请输入查询关键词",
                                     color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f),
                                     fontSize = 17.sp,
-                                    maxLines = 1,
                                 )
                             }
                             inner()
@@ -747,6 +723,33 @@ private fun PermissionCard(onRequest: () -> Unit, onAppDetails: () -> Unit) {
                 Button(onClick = onRequest) { Text("去授权") }
                 TextButton(onClick = onAppDetails) { Text("打开应用详情") }
             }
+        }
+    }
+}
+
+/**
+ * 索引状态横条（原版同款）：页签行下方的全宽浅黄横幅，融入顶部 UI 布局流，
+ * 推挤内容而非悬浮；配色取自原版实测（底 #FFFDE8 / 字 #ECB763 采自原版截图），
+ * 深色主题下换深底亮字避免刺眼。
+ */
+@Composable
+private fun IndexStatusStrip(text: String) {
+    val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    Surface(
+        color = if (dark) Color(0xFF32301F) else Color(0xFFFFFDE8),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(42.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (dark) Color(0xFFF2C368) else Color(0xFFE6AC4E),
+            )
         }
     }
 }
