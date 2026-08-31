@@ -14,7 +14,9 @@ val keystoreProps = Properties().apply {
 
 android {
     namespace = "com.masgzy.anything"
-    compileSdk = 36
+    // 37 = Android 17：compose 1.12.0 与 material-kolor 5.0.1 的
+    // AAR 元数据均要求 ≥37（与 ImageToolbox 一致）
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.masgzy.anything"
