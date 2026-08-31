@@ -27,7 +27,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 /**
- * 关于页 —— 结构还原原版（居中圆形 logo + 应用名 + 开发者署名）。
+ * 关于页 —— 居中圆形 logo + 应用名 + 许可与致敬信息。
+ * 文案面向用户：只保留 Apache-2.0 许可，不展示实现技术栈。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,9 +43,9 @@ fun AboutScreen(onBack: () -> Unit) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
                 ),
             )
         },
@@ -88,13 +89,8 @@ fun AboutScreen(onBack: () -> Unit) {
             )
             Spacer(Modifier.height(40.dp))
             Text(
-                "Go 高性能引擎 + Kotlin 外壳",
+                "Apache-2.0 开源许可",
                 style = MaterialTheme.typography.bodyMedium,
-            )
-            Text(
-                "开源 · Apache-2.0",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
             Text(

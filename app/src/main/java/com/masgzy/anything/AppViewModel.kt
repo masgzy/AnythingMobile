@@ -23,8 +23,12 @@ import java.io.File
  *
  * 鲁棒性：
  *  - 搜索输入经 150ms 防抖后再触达引擎，避免高频 JNI 调用；
- *  - 自动扫描带 2s 防抖（快速前后台切换不重复触发）；
+ *  - 自动扫描带 800ms 防抖（快速前后台切换不重复触发），
+ *    且引擎就绪翻转时立即补发一次（覆盖"就绪晚于首个 ON_RESUME"的窗口）；
  *  - 所有引擎调用由 EngineRepository 内部兜底，异常不外泄。
+ *
+ * 扫描速度（v0.3）：索引随快照磁盘持久化，进入应用时恢复即搜，
+ * 自动增量扫描只处理变动文件，通常一闪而过。
  */
 @OptIn(FlowPreview::class)
 class AppViewModel(application: Application) : AndroidViewModel(application) {
@@ -44,6 +48,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             queryFlow.debounce(150).collect { repo.search(it) }
+        }
+        // 引擎从后台线程就绪时，主动补一次自动扫描：
+        // 冷启动时首个 ON_RESUME 往往早于引擎就绪，若不补发，
+        // 本次进入应用的自动索引更新会被跳过。
+        viewModelScope.launch {
+            var wasReady = false
+            repo.state.collect { st ->
+                if (st.ready && !wasReady) autoScanIfNeed()
+                wasReady = st.ready
+            }
         }
     }
 
@@ -70,8 +84,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // ---- 索引更新 ----
 
     /**
-     * 进入应用（ON_RESUME）自动增量扫描：
-     * 需要引擎可用 + 已授权 + 未在扫描中 + 用户未关闭 + 距上次触发超过 2s。
+     * 进入应用（ON_RESUME / 引擎就绪）自动增量扫描：
+     * 需要引擎可用 + 已授权 + 未在扫描中 + 用户未关闭 + 距上次触发超过 800ms。
      */
     fun autoScanIfNeed() {
         val context = getApplication<Application>()
@@ -80,7 +94,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (!StoragePermissions.hasStorageAccess(context)) return
         if (repo.state.value.phase != com.masgzy.anything.data.ScanPhase.IDLE) return
         val now = System.currentTimeMillis()
-        if (now - lastAutoScanAt < 2_000) return
+        if (now - lastAutoScanAt < 800) return
         lastAutoScanAt = now
         startScan(incremental = true)
     }

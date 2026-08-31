@@ -74,6 +74,12 @@ type Engine struct {
         dirs    *NameIndex // 目录名索引（kind=folder）
         content *ContentStore
 
+        // 磁盘持久化：dataDir 为空时不启用；restoreOnce 保证只恢复一次；
+        // saveWG 用于串行化"上一次快照落盘"与"下一次扫描"。
+        dataDir     string
+        restoreOnce sync.Once
+        saveWG      sync.WaitGroup
+
         listener  atomic.Value // ProgressListener
         extParser atomic.Value // ExternalParser
 
@@ -94,8 +100,10 @@ type Engine struct {
 }
 
 // NewEngine 创建引擎；workers<=0 时按 CPU 核数自动决定（上限 8）。
-// Java 侧可用构造器 Engine(workers) 或 Core.newEngine(workers)。
-func NewEngine(workers int) (*Engine, error) {
+// dataDir 为索引快照目录（通常传应用 filesDir 下的子目录）：
+// 构造时同步恢复已有索引，实现"打开即可搜索"；传空串则禁用持久化。
+// Java 侧可用构造器 Engine(workers, dataDir) 或 Core.newEngine(workers, dataDir)。
+func NewEngine(workers int, dataDir string) (*Engine, error) {
         if workers <= 0 {
                 workers = runtime.NumCPU()
                 if workers > 8 {
@@ -105,12 +113,15 @@ func NewEngine(workers int) (*Engine, error) {
         if workers < 1 {
                 workers = 1
         }
-        return &Engine{
+        e := &Engine{
                 workers: workers,
                 names:   NewNameIndex("file"),
                 dirs:    NewNameIndex("folder"),
                 content: NewContentStore(),
-        }, nil
+                dataDir: dataDir,
+        }
+        e.restoreSnapshot() // 秒开的关键：构造即恢复上次索引
+        return e, nil
 }
 
 // SetListener 设置进度监听器，可在任意时刻替换。gobind: setListener
@@ -155,6 +166,9 @@ func (e *Engine) StartScan(optionsJSON string) error {
         if !e.scanning.CompareAndSwap(false, true) {
                 return errors.New("core: 扫描已在进行中")
         }
+        // 等待上一次快照落盘完成，保证本次扫描期间无并发写盘，
+        // 也避免"保存的是扫描进行到一半的状态"。
+        e.saveWG.Wait()
         e.cancel.Store(false)
         e.startAt.Store(time.Now().UnixMilli())
 
@@ -210,6 +224,15 @@ func (e *Engine) StartScan(optionsJSON string) error {
                         e.notifyFinished(string(b))
                 }
                 e.scanning.Store(false)
+                // 成功收尾后异步落盘快照；失败不影响扫描结果。
+                if !cancelled && e.dataDir != "" {
+                        e.saveWG.Add(1)
+                        go func() {
+                                defer e.saveWG.Done()
+                                defer func() { _ = recover() }() // 落盘失败绝不拖垮进程
+                                _ = e.saveSnapshot()
+                        }()
+                }
         }
 
         go func() {

@@ -1,7 +1,10 @@
 package com.masgzy.anything.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AllInclusive
@@ -39,9 +43,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.masgzy.anything.data.UiHit
 import java.text.SimpleDateFormat
@@ -63,9 +69,19 @@ enum class FileCategory(val label: String, val icon: ImageVector, val exts: Set<
 
 val FileCategory.isAll: Boolean get() = this == FileCategory.ALL
 
+/**
+ * 类别判定顺序：先查更具体的 office 子类，再查大类。
+ * 顺序错误会让 DOC 的扩展名集合遮蔽 Word/Excel/PPT，
+ * 导致 office 页签筛选永远为空（已修复的 bug）。
+ */
+private val categoryLookup = listOf(
+    FileCategory.WORD, FileCategory.EXCEL, FileCategory.PPT,
+    FileCategory.VIDEO, FileCategory.AUDIO, FileCategory.IMAGE, FileCategory.DOC,
+)
+
 fun categoryOf(path: String): FileCategory {
     val ext = path.substringAfterLast('.', "").lowercase()
-    return FileCategory.entries.firstOrNull { it.exts.contains(ext) } ?: FileCategory.ALL
+    return categoryLookup.firstOrNull { ext in it.exts } ?: FileCategory.ALL
 }
 
 /** 结果条目主图标。 */
@@ -247,43 +263,67 @@ private fun SheetAction(icon: ImageVector, label: String, onClick: () -> Unit) {
     }
 }
 
-/** 底部筛选圆钮（含上方悬浮标签气泡，还原原版样式）。 */
+/**
+ * 底部筛选圆钮（含上方悬浮标签气泡，还原原版样式）。
+ *
+ * 注意：label 传 null 时不显示气泡（漏斗钮无标签，同原版）；
+ * 选中/未选中颜色经 animateColorAsState 过渡，不再生硬跳变。
+ */
 @Composable
 fun FilterButton(
-    label: String,
     icon: ImageVector,
     selected: Boolean,
     onClick: () -> Unit,
+    label: String? = null,
+    size: Dp = 48.dp,
 ) {
+    val containerColor by animateColorAsState(
+        targetValue = if (selected) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.surfaceContainerHigh,
+        animationSpec = tween(220),
+        label = "filterContainer",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (selected) MaterialTheme.colorScheme.onPrimary
+        else MaterialTheme.colorScheme.primary,
+        animationSpec = tween(220),
+        label = "filterContent",
+    )
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.inverseSurface,
-        ) {
-            Text(
-                label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.inverseOnSurface,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-            )
-        }
-        Spacer(Modifier.height(6.dp))
-        Surface(
-            shape = RoundedCornerShape(50),
-            color = if (selected) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = if (selected) 0.dp else 3.dp,
-            shadowElevation = 3.dp,
-            modifier = Modifier.size(46.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    icon, label,
-                    tint = if (selected) MaterialTheme.colorScheme.onPrimary
-                    else MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp),
+        if (label != null) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shadowElevation = 2.dp,
+            ) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                 )
             }
+            Spacer(Modifier.height(6.dp))
+        }
+        Box(
+            modifier = Modifier
+                .size(size)
+                .clip(CircleShape)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = containerColor,
+                tonalElevation = if (selected) 0.dp else 3.dp,
+                shadowElevation = 3.dp,
+                modifier = Modifier.size(size),
+            ) {}
+            Icon(
+                icon, label ?: "",
+                tint = contentColor,
+                modifier = Modifier.size(size * 22 / 48),
+            )
         }
     }
 }

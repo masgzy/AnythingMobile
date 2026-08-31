@@ -62,37 +62,33 @@ data class ScanSummary(
  * Go 核心引擎的 Kotlin 封装。
  *
  * 鲁棒性设计：
- *  - 引擎构造失败（如个别设备 .so 加载异常）不会抛出崩溃，
+ *  - 引擎在后台线程构造（构造时会同步恢复磁盘索引快照，避免主线程卡顿），
+ *    构造失败（如个别设备 .so 加载异常）不会抛出崩溃，
  *    而是进入降级模式：界面可见 initError 提示，所有引擎调用安全跳过；
+ *  - 就绪前 repoState.ready == false，自动扫描与手动按钮均被挡住；
  *  - 所有跨语言调用均 runCatching 包裹，JSON 解析失败不影响 UI 状态。
  *
+ * 索引持久化（v0.3）：引擎指向 filesDir/engine_index，扫描收尾自动落盘，
+ * 下次启动构造即恢复 —— 打开即可搜索，不再每次全量重建。
+ *
  * 引擎 API（gobind lowerCamelCase 映射）：
- *   Engine(workers) / setListener / startScan(optionsJson) /
+ *   Engine(workers, dataDir) / setListener / startScan(optionsJson) /
  *   search(q, limit) / removePaths(pathsJson) / cancelScan / isScanning / stats
  */
 class EngineRepository(context: Context) {
 
     private val appContext = context.applicationContext
 
-    /** 引擎实例；null = 初始化失败，进入降级模式。 */
-    private val engine: Engine? = runCatching {
-        Engine(0) // workers=0 => 引擎按 CPU 核数自动决定
-    }.onFailure { t ->
-        android.util.Log.e("AnythingEngine", "Go 引擎初始化失败", t)
-    }.getOrNull()
+    /** 引擎实例；null = 初始化失败，进入降级模式。后台线程构造，@Volatile 保证可见性。 */
+    @Volatile
+    private var engine: Engine? = null
 
     private val _state = MutableStateFlow(
-        EngineUiState(
-            ready = engine != null,
-            initError = if (engine == null) {
-                "搜索引擎初始化失败，请尝试重新安装应用；若持续出现请提交反馈"
-            } else null,
-        )
+        EngineUiState(statusText = "正在准备引擎…")
     )
     val state: StateFlow<EngineUiState> = _state
 
-    init {
-        engine?.setListener(object : ProgressListener {
+    private val listener = object : ProgressListener {
             override fun onProgress(phase: String?, done: Long) {
                 _state.value = _state.value.copy(
                     scanned = done,
@@ -129,10 +125,32 @@ class EngineRepository(context: Context) {
                     statusText = "提醒: ${message ?: "未知错误"}"
                 )
             }
-        })
     }
 
-    val hasEngine: Boolean get() = engine != null
+    init {
+        // 后台线程构造引擎：NewEngine 内部会同步恢复磁盘索引快照，
+        // 大索引（十万级条目）时避免阻塞主线程。就绪后置 ready=true，
+        // ViewModel 监听该状态翻转并触发首次自动增量扫描。
+        Thread {
+            val eng = runCatching {
+                Engine(0, File(appContext.filesDir, "engine_index").absolutePath)
+            }.onFailure { t ->
+                android.util.Log.e("AnythingEngine", "Go 引擎初始化失败", t)
+            }.getOrNull()
+            engine = eng
+            eng?.setListener(listener)
+            _state.value = _state.value.copy(
+                ready = eng != null,
+                initError = if (eng == null) {
+                    "搜索引擎初始化失败，请尝试重新安装应用；若持续出现请提交反馈"
+                } else null,
+                statusText = if (eng == null) "引擎不可用" else "就绪",
+            )
+        }.start()
+    }
+
+    val hasEngine: Boolean
+        get() = engine != null
 
     /**
      * 启动索引更新。

@@ -1,6 +1,8 @@
 package core
 
 import (
+        "bytes"
+        "encoding/gob"
         "encoding/json"
         "os"
         "path/filepath"
@@ -56,7 +58,7 @@ func TestEngineScanAndSearch(t *testing.T) {
                 t.Fatal(err)
         }
 
-        e, err := NewEngine(2)
+        e, err := NewEngine(2, "")
         if err != nil {
                 t.Fatal(err)
         }
@@ -120,7 +122,7 @@ func TestEngineScanAndSearch(t *testing.T) {
 
 func TestEngineDoubleScanRejected(t *testing.T) {
         dir := t.TempDir()
-        e, _ := NewEngine(2)
+        e, _ := NewEngine(2, "")
         opt, _ := json.Marshal(ScanOptions{Roots: []string{dir}, Mode: "incremental"})
         if err := e.StartScan(string(opt)); err != nil {
                 t.Fatal(err)
@@ -150,7 +152,7 @@ func TestEngineIncrementalScan(t *testing.T) {
                 t.Fatal(err)
         }
 
-        e, _ := NewEngine(2)
+        e, _ := NewEngine(2, "")
         c := newCollector()
         e.SetListener(c)
 
@@ -241,4 +243,169 @@ func searchOnce(t *testing.T, e *Engine, q string) SearchResponse {
                 t.Fatalf("响应非法: %v", err)
         }
         return sr
+}
+
+// waitForSnapshot 轮询等待快照文件落盘（保存为异步）。
+func waitForSnapshot(t *testing.T, dataDir string) {
+        t.Helper()
+        final := filepath.Join(dataDir, "index.snap")
+        deadline := time.Now().Add(5 * time.Second)
+        for time.Now().Before(deadline) {
+                if _, err := os.Stat(final); err == nil {
+                        return
+                }
+                time.Sleep(20 * time.Millisecond)
+        }
+        t.Fatal("快照未在限时内落盘")
+}
+
+// waitForSnapshotContent 轮询等待"包含指定路径全文"的新快照落盘。
+// 因为 saveSnapshot 是原子替换，旧快照会一直存在，
+// 单纯等文件存在无法区分新旧两次保存。
+func waitForSnapshotContent(t *testing.T, dataDir, wantPath string) {
+        t.Helper()
+        final := filepath.Join(dataDir, "index.snap")
+        deadline := time.Now().Add(5 * time.Second)
+        for time.Now().Before(deadline) {
+                data, err := os.ReadFile(final)
+                if err == nil {
+                        var snap snapshot
+                        if decErr := gob.NewDecoder(bytes.NewReader(data)).Decode(&snap); decErr == nil {
+                                for _, c := range snap.Contents {
+                                        if c.Path == wantPath {
+                                                return
+                                        }
+                                }
+                        }
+                }
+                time.Sleep(20 * time.Millisecond)
+        }
+        t.Fatalf("含 %s 的快照未在限时内落盘", wantPath)
+}
+
+// TestEnginePersistence 验证索引磁盘持久化：
+// 进程"重启"（新建引擎指向同一数据目录）后无需全量重建即可搜索，
+// 且增量扫描不再标记为首次建索引。
+func TestEnginePersistence(t *testing.T) {
+        dataDir := t.TempDir()
+        src := t.TempDir()
+        f1 := filepath.Join(src, "报表汇总.txt")
+        if err := os.WriteFile(f1, []byte("季度报表汇总内容"), 0o644); err != nil {
+                t.Fatal(err)
+        }
+        sub := filepath.Join(src, "资料夹")
+        if err := os.MkdirAll(sub, 0o755); err != nil {
+                t.Fatal(err)
+        }
+
+        // ---- 第一次"运行"：建索引并落盘 ----
+        e1, err := NewEngine(2, dataDir)
+        if err != nil {
+                t.Fatal(err)
+        }
+        c1 := newCollector()
+        e1.SetListener(c1)
+        opt, _ := json.Marshal(ScanOptions{Roots: []string{src}, Mode: "incremental"})
+        if err := e1.StartScan(string(opt)); err != nil {
+                t.Fatal(err)
+        }
+        select {
+        case s := <-c1.finished:
+                var st Stats
+                json.Unmarshal([]byte(s), &st)
+                if !st.FirstBuild || st.Files != 1 {
+                        t.Fatalf("首次扫描应为 first_build 且 1 文件: %+v", st)
+                }
+        case <-time.After(10 * time.Second):
+                t.Fatal("首次扫描超时")
+        }
+        waitForSnapshot(t, dataDir)
+
+        // ---- 第二次"运行"：新引擎从快照恢复 ----
+        e2, err := NewEngine(2, dataDir)
+        if err != nil {
+                t.Fatal(err)
+        }
+        // 恢复后不扫描即可直接搜索（"打开即可搜"）
+        sr := searchOnce(t, e2, "报表汇总")
+        if sr.Total != 1 || sr.Hits[0].Matched != "name" {
+                t.Fatalf("快照恢复后文件名搜索失败: %+v", sr)
+        }
+        sr = searchOnce(t, e2, "资料夹")
+        if sr.Total < 1 || sr.Hits[0].Kind != "folder" {
+                t.Fatalf("快照恢复后目录搜索失败: %+v", sr)
+        }
+
+        // 恢复后的增量扫描不应再是首次建索引
+        c2 := newCollector()
+        e2.SetListener(c2)
+        if err := e2.StartScan(string(opt)); err != nil {
+            t.Fatal(err)
+        }
+        select {
+        case s := <-c2.finished:
+                var st Stats
+                json.Unmarshal([]byte(s), &st)
+                if st.FirstBuild {
+                        t.Fatalf("恢复后扫描不应是 first_build: %+v", st)
+                }
+                if st.Added != 0 || st.Updated != 0 || st.Removed != 0 {
+                        t.Fatalf("恢复后无变动扫描不应有增删改: %+v", st)
+                }
+        case <-time.After(10 * time.Second):
+                t.Fatal("恢复后扫描超时")
+        }
+        waitForSnapshot(t, dataDir)
+
+        // ---- 第三次"运行"：全文也应随快照恢复 ----
+        // 第一轮仅 txt（不可解析）文件，这里回填一篇宿主全文再落盘验证
+        if err := e2.AddDocumentText(f1, "这是随快照持久化的正文内容"); err != nil {
+                t.Fatal(err)
+        }
+        // 触发一次扫描收尾，让 AddDocumentText 的内容随快照落盘
+        c2b := newCollector()
+        e2.SetListener(c2b)
+        if err := e2.StartScan(string(opt)); err != nil {
+                t.Fatal(err)
+        }
+        select {
+        case <-c2b.finished:
+        case <-time.After(10 * time.Second):
+                t.Fatal("回填后扫描超时")
+        }
+        waitForSnapshotContent(t, dataDir, f1)
+
+        e3, err := NewEngine(2, dataDir)
+        if err != nil {
+                t.Fatal(err)
+        }
+        sr = searchOnce(t, e3, "随快照持久化的正文")
+        if sr.Total != 1 || sr.Hits[0].Matched != "content" {
+                t.Fatalf("全文未随快照恢复: %+v", sr)
+        }
+
+        // ---- 快照损坏时静默放弃，回到全量首次建索引 ----
+        if err := os.WriteFile(filepath.Join(dataDir, "index.snap"), []byte("garbage"), 0o644); err != nil {
+                t.Fatal(err)
+        }
+        e4, err := NewEngine(2, dataDir)
+        if err != nil {
+                t.Fatal(err)
+        }
+        c4 := newCollector()
+        e4.SetListener(c4)
+        if err := e4.StartScan(string(opt)); err != nil {
+                t.Fatal(err)
+        }
+        select {
+        case s := <-c4.finished:
+                var st Stats
+                json.Unmarshal([]byte(s), &st)
+                if !st.FirstBuild || st.Files != 1 {
+                        t.Fatalf("快照损坏后应回退首次建索引: %+v", st)
+                }
+        case <-time.After(10 * time.Second):
+                t.Fatal("快照损坏后扫描超时")
+        }
+        waitForSnapshot(t, dataDir)
 }

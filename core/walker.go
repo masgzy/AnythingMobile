@@ -176,15 +176,27 @@ func safeExtract(path string) (text string, err error) {
 // handleFile 处理单个文件：入文件名索引；可解析文档尝试全文抽取。
 // incremental=true 时，若索引中已有同路径且 size/mtime 均未变化，
 // 则直接跳过（仅保留进度计数），实现秒级增量重扫。
+// 特例：名称未变但全文缺失（如上次快照保存不完整）的文档会自动补解析，
+// 保证名称索引与全文库最终一致。
 func (e *Engine) handleFile(path string, info fs.FileInfo, incremental bool) {
         size := info.Size()
         mtime := info.ModTime().UnixMilli()
+        ext := extOf(path)
 
         if incremental {
-                if oldSize, oldMtime, ok := e.names.lookupPath(path); ok {
-                        if oldSize == size && oldMtime == mtime {
+                oldSize, oldMtime, had := e.names.lookupPath(path)
+                if had && oldSize == size && oldMtime == mtime {
+                        if !docExts[ext] || e.content.Has(path) {
                                 return // 未变化：跳过索引与文档解析
                         }
+                        // 名称未变但全文缺失：仅补解析正文，不重复计数
+                        e.docsFound.Add(1)
+                        if size <= maxParseSize && size > 0 {
+                                e.parseAndStore(path, ext)
+                        }
+                        return
+                }
+                if had {
                         e.updated.Add(1)
                 } else {
                         e.added.Add(1)
@@ -193,7 +205,6 @@ func (e *Engine) handleFile(path string, info fs.FileInfo, incremental bool) {
 
         e.names.Add(path, size, mtime)
 
-        ext := extOf(path)
         if !docExts[ext] {
                 return
         }
@@ -202,9 +213,14 @@ func (e *Engine) handleFile(path string, info fs.FileInfo, incremental bool) {
                 return
         }
 
-        // 增量模式中被标记 updated 的文件需要先移除旧全文，避免占双份容量
+        // 变更文件先移除旧全文，避免占双份容量
         e.content.Remove(path)
+        e.parseAndStore(path, ext)
+}
 
+// parseAndStore 按扩展名选择解析通道（内置 OOXML / 宿主兜底 / 暂不支持），
+// 成功抽取的正文写入全文库。
+func (e *Engine) parseAndStore(path, ext string) {
         var (
                 text string
                 err  error

@@ -32,25 +32,45 @@ data class AppSettings(
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
-/** 预设主题种子色板（关闭 Monet 或 Android <12 时生效）。 */
+/**
+ * 预设主题种子色板（关闭 Monet 或 Android <12 时生效）。
+ *
+ * 直接采用 ImageToolbox（T8RIN/ImageToolbox，Apache-2.0）外观设置中
+ * ColorTupleDefaults.defaultColorTuples 的 16 个预设色，另保留
+ * 原版 Anything 的靛蓝作为默认值，兼顾"复刻原版"与"高度自定义"。
+ */
 object SeedPalette {
     // 默认取原版 Anything 的靛蓝主色
     const val DEFAULT = 0xFF3F51B5.toInt()
 
-    val entries: List<Pair<Int, String>> = listOf(
-        0xFF3F51B5.toInt() to "靛蓝",
-        0xFF2196F3.toInt() to "蓝",
-        0xFF00BCD4.toInt() to "青",
-        0xFF009688.toInt() to "青绿",
-        0xFF4CAF50.toInt() to "绿",
-        0xFF8BC34A.toInt() to "黄绿",
-        0xFFFF9800.toInt() to "橙",
-        0xFFF44336.toInt() to "红",
-        0xFFE91E63.toInt() to "粉",
-        0xFF9C27B0.toInt() to "紫",
-        0xFF673AB7.toInt() to "深紫",
-        0xFF607D8B.toInt() to "蓝灰",
+    /** 自定义色（用户在调色板弹窗输入任意十六进制色）占位标记，仅用于文案。 */
+    const val CUSTOM = "自定义"
+
+    data class Swatch(val argb: Int, val name: String)
+
+    val entries: List<Swatch> = listOf(
+        Swatch(0xFF3F51B5.toInt(), "靛蓝 · 默认"),
+        Swatch(0xFFf8130d.toInt(), "绯红"),
+        Swatch(0xFF7a000b.toInt(), "酒红"),
+        Swatch(0xFF8a3a00.toInt(), "赭石"),
+        Swatch(0xFFff7900.toInt(), "亮橙"),
+        Swatch(0xFFfcf721.toInt(), "柠檬黄"),
+        Swatch(0xFF88dd20.toInt(), "草绿"),
+        Swatch(0xFF16B16E.toInt(), "翡翠"),
+        Swatch(0xFF01a0a3.toInt(), "青碧"),
+        Swatch(0xFF005FFF.toInt(), "蔚蓝"),
+        Swatch(0xFFfa64e1.toInt(), "粉红"),
+        Swatch(0xFFd7036a.toInt(), "玫红"),
+        Swatch(0xFFdb94fe.toInt(), "兰紫"),
+        Swatch(0xFF7b2bec.toInt(), "紫罗兰"),
+        Swatch(0xFF022b6d.toInt(), "藏青"),
+        Swatch(0xFFFFFFFF.toInt(), "纯白"),
+        Swatch(0xFF000000.toInt(), "纯黑"),
     )
+
+    /** 按色值查名称；自定义色返回"自定义"。 */
+    fun nameOf(argb: Int): String =
+        entries.firstOrNull { it.argb == argb }?.name ?: "自定义"
 }
 
 class SettingsRepository(context: Context) {
