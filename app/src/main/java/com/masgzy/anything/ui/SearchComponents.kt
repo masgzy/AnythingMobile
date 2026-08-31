@@ -318,7 +318,9 @@ fun FilterButton(
                 modifier = Modifier.height(labelSlotHeight),
                 contentAlignment = Alignment.BottomCenter,
             ) {
-                AnimatedVisibility(
+                // 全限定：此处处于 Column{Box{}} 嵌套中，简名会被
+                // ColumnScope.AnimatedVisibility 扩展抢绑定（K2 编译错误）
+                androidx.compose.animation.AnimatedVisibility(
                     visible = showLabel,
                     enter = fadeIn(tween(150)) + scaleIn(
                         initialScale = 0.6f,
