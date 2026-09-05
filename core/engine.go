@@ -51,7 +51,11 @@ type ScanOptions struct {
 
 // Stats 一次扫描/索引的统计信息。
 type Stats struct {
-	Files       int64  `json:"files"`        // 本次遍历的文件总数
+	Files int64 `json:"files"` // 本次遍历的文件总数（本轮计数器，未扫描时为 0）
+	// Indexed 索引内现存文件条目数（与 first_build 判定同口径，含快照恢复）。
+	// 宿主在"尚未扫描"时只能用它判断是否首次使用：Files 冷启动恒为 0，
+	// 误用会导致每次启动都弹出首次建索引遮罩。
+	Indexed     int64  `json:"indexed"`
 	Added       int64  `json:"added"`        // 新增入索引的文件数
 	Updated     int64  `json:"updated"`      // 内容有变化而重新索引的文件数
 	Removed     int64  `json:"removed"`      // 已消失（被删除）而移出索引的条目数
@@ -223,6 +227,7 @@ func (e *Engine) finishScan(mode string, cancelled bool) {
 func (e *Engine) currentStats(cancelled bool) Stats {
 	return Stats{
 		Files:       e.files.Load(),
+		Indexed:     e.names.Count(),
 		Added:       e.added.Load(),
 		Updated:     e.updated.Load(),
 		Removed:     e.removed.Load(),

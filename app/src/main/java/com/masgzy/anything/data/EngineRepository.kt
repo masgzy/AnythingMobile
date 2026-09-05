@@ -180,7 +180,10 @@ class EngineRepository(context: Context) {
     }
 
     private fun isIndexEmpty(): Boolean = runCatching {
-        JSONObject(engine?.stats() ?: "{}").optLong("files", 1) == 0L
+        // 必须读 indexed（索引内现存条目数，含快照恢复，与引擎 first_build 同口径）；
+        // files 是"本轮遍历计数器"，冷启动尚未扫描时恒为 0，
+        // 误读会导致每次进入应用都误判首次使用并弹出建索引遮罩。
+        JSONObject(engine?.stats() ?: "{}").optLong("indexed", 1) == 0L
     }.getOrDefault(false)
 
     fun cancelScan() {

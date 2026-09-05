@@ -393,6 +393,17 @@ func TestEnginePersistence(t *testing.T) {
 		t.Fatalf("快照恢复后目录搜索失败: %+v", sr)
 	}
 
+	// 回归（宿主"每次启动都弹首次使用"）：恢复后、未扫描前，
+	// Stats.Indexed 必须反映快照恢复的条目数，而 Files（本轮遍历
+	// 计数器）为 0。宿主只能以 indexed==0 判定首次使用。
+	var pre Stats
+	if err := json.Unmarshal([]byte(e2.Stats()), &pre); err != nil {
+		t.Fatal(err)
+	}
+	if pre.Indexed != 1 || pre.Files != 0 {
+		t.Fatalf("恢复后 Stats 应 indexed=1 files=0: %+v", pre)
+	}
+
 	// 恢复后的增量扫描不应再是首次建索引
 	c2 := newCollector()
 	e2.SetListener(c2)
