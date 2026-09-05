@@ -22,8 +22,8 @@ android {
         applicationId = "com.masgzy.anything"
         minSdk = 24
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.0.0-alpha7"
+        versionCode = 8
+        versionName = "1.0.0-alpha8"
     }
 
     // 按 ABI 拆分产物：三种单架构 APK + 一个 universal 通吃包。
