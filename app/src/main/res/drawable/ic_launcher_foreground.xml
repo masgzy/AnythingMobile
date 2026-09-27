@@ -1,16 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  AnythingMobile 启动图标前景 —— 第八轮(v8)「恢复留白」
-  (用户真机实拍二次指正: v7b 内容贴顶占满遮罩, 边距太小, 与原版观感不一致):
-  自适应图标 108 画布会被启动器遮罩裁到中心 72 单位可见窗, v7b 按原版
-  全出血素材实测"贴顶"属于参照系误判 —— 原版 app 是 legacy PNG, 启动器
-  先整体缩小再套遮罩, 真机观感本就是"小内容+大留白" (原版 icon.png 实测:
-  内容占宽 50%/高 48%, 四周留白~25%, 居中)。
-  本版设计零改动: 三条路径(vivo Sans Global Heavy "Anything" 字标轮廓,
-  字体合规声明见 git 历史 394147e)原样保留, 外包 <group> 整组 x0.68 并把
+  AnythingMobile 启动图标前景 —— 第九轮(v9)「留白微调」
+  (用户 alpha8 真机反馈: v8 留白尺度对了但"有一点大了, 再小一点"):
+  设计零改动: 三条路径(vivo Sans Global Heavy "Anything" 字标轮廓,
+  字体合规声明见 git 历史 394147e)原样保留, 整组缩放 ×0.74 并把
   内容包围盒中心精确映射到可见窗中心(54,54):
-  内容占窗 64%, 四周窗内留白 25%,
-  最远角 r29.1 < 33 安全区(任意遮罩不裁切)。
+  内容占窗 70%, 四周窗内留白 23%,
+  最远角 r31.7 < 33 安全区(任意遮罩不裁切)。
   monochrome 与前景共用本矢量, 镜内真实透明孔天然成立。-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -18,10 +14,10 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group
-        android:scaleX="0.68"
-        android:scaleY="0.68"
-        android:pivotX="52.9481"
-        android:pivotY="57.5700">
+        android:scaleX="0.74"
+        android:scaleY="0.74"
+        android:pivotX="52.5912"
+        android:pivotY="58.7815">
 
         <!-- 镜环(描边圆) -->
         <path
