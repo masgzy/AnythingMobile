@@ -110,6 +110,11 @@ type Engine struct {
 	seenMu sync.Mutex
 	seen   map[string]struct{}
 
+	// pp 文档解析流水线（alpha11）：遍历协程只入队，独立池消费。
+	// beginScanCycle 创建新实例，仅本轮扫描内有效；创建发生在
+	// 遍历协程启动之前（happens-before），期间只读访问。
+	pp *parsePool
+
 	firstBuild bool // 本次扫描开始时索引是否为空
 }
 
@@ -199,6 +204,7 @@ func (e *Engine) beginScanCycle(mode string) {
 	e.removed.Store(0)
 	e.docsFound.Store(0)
 	e.docsIndexed.Store(0)
+	e.pp = newParsePool(e)
 }
 
 // finishScan 统一收尾：增量模式下移除"本次遍历未见到"的已删除条目、

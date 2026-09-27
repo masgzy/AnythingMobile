@@ -72,6 +72,10 @@ func (e *Engine) traverse(roots []string, incremental bool) bool {
 	}
 	e.dirs.AddBatch(rootDirs)
 	w.run(e.workers)
+	// 目录遍历结束后等待解析流水线排空：此刻不再有新任务入队，
+	// run 返回即代表本轮全文解析全部完成，finishScan 的 RemoveExcept
+	// 与快照落盘才能看到完整一致的全文库（取消时快速返回）。
+	e.pp.run(parseWorkersFor(e.workers))
 	return e.cancel.Load()
 }
 
@@ -275,9 +279,10 @@ func (e *Engine) handleFile(path string, info fs.FileInfo, incremental bool) {
 
 // processFileBatch 批量处理一组文件（一个目录的直接子文件）：
 // 增量模式先用一次读锁批量查重，size/mtime 均未变化的文件直接跳过
-// （实现秒级增量重扫）；需要入索引的条目用一次写锁批量插入，
-// 随后逐个解析可读文档的全文。旧实现逐文件获取 2~3 次索引锁，
-// 八协程并发扫描十万级文件时锁竞争明显，按目录合并后降为每目录 2 次。
+// （实现秒级增量重扫）；需要入索引的条目用一次写锁批量插入。
+// 可解析文档不在此处同步解析（旧实现内联解析会让遍历协程被大文档
+// 卡住），而是入队解析流水线（parsePool）由独立 worker 消费，
+// 目录遍历与文档解析两条流水线并行，互不阻塞。
 func (e *Engine) processFileBatch(paths []string, infos []fs.FileInfo, incremental bool) {
 	if len(paths) == 0 {
 		return
@@ -309,7 +314,7 @@ func (e *Engine) processFileBatch(paths []string, infos []fs.FileInfo, increment
 				if docExts[ext] && !e.content.Has(path) {
 					e.docsFound.Add(1)
 					if size <= maxParseSize && size > 0 {
-						e.parseAndStore(path, ext)
+						e.pp.enqueue(path, ext)
 					}
 				}
 				continue
@@ -341,14 +346,16 @@ func (e *Engine) processFileBatch(paths []string, infos []fs.FileInfo, increment
 		if it.size > maxParseSize || it.size == 0 {
 			continue
 		}
-		// 变更文件先移除旧全文，避免占双份容量
+		// 变更文件先移除旧全文，避免占双份容量；
+		// 解析交给流水线（入队非阻塞，不拖慢遍历协程）。
 		e.content.Remove(it.path)
-		e.parseAndStore(it.path, extOf(it.path))
+		e.pp.enqueue(it.path, extOf(it.path))
 	}
 }
 
 // parseAndStore 按扩展名选择解析通道（内置 OOXML / 宿主兜底 / 暂不支持），
-// 成功抽取的正文写入全文库。
+// 成功抽取的正文写入全文库。alpha11 起由解析流水线 worker 调用，
+// 不再在遍历协程上执行。
 func (e *Engine) parseAndStore(path, ext string) {
 	var (
 		text string
