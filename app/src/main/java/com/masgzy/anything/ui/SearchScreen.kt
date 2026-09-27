@@ -275,6 +275,11 @@ fun SearchScreen(
                             query = repoState.query,
                             sortByName = settings.sortByName,
                             filter = filter,
+                            realTotal = when (page) {
+                                0 -> repoState.totalFiles
+                                1 -> repoState.totalContent
+                                else -> repoState.totalDirs
+                            },
                             selected = selected,
                             onItemClick = { hit ->
                                 if (inSelectMode) {
@@ -372,6 +377,8 @@ private fun HitListPage(
     query: String,
     sortByName: Boolean,
     filter: FileCategory,
+    /** 该页签的真实命中总数（引擎全量统计，不受返回上限影响）。 */
+    realTotal: Long,
     selected: Set<String>,
     onItemClick: (UiHit) -> Unit,
     onItemLongClick: (UiHit) -> Unit,
@@ -406,7 +413,9 @@ private fun HitListPage(
                     1 -> "正文中包含 \"$query\" 的文档有"
                     else -> "目录名中包含 \"$query\" 的目录有"
                 }
-                ResultHeader(header, visible.size)
+                // 无类别筛选时展示引擎统计的真实命中总数（而非被截断后的返回条数）；
+                // 有筛选时列表只含筛选后的条目，计数与之一致
+                ResultHeader(header, if (filter.isAll) realTotal.toInt() else visible.size)
             }
             items(visible, key = { it.path }) { hit ->
                 HitItem(
@@ -417,8 +426,10 @@ private fun HitListPage(
                 )
             }
             item(key = "footer-$page") {
+                val truncated = filter.isAll && realTotal > visible.size
                 Text(
-                    "没有更多了",
+                    if (truncated) "共命中 ${realTotal} 项，仅展示前 ${visible.size} 条，可输入更长关键词缩小范围"
+                    else "没有更多了",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier

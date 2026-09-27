@@ -59,12 +59,12 @@ func TestNameIndexIncrementalAPI(t *testing.T) {
 	idx.Add("/sdcard/b.txt", 2, 2)
 	idx.Add("/sdcard/c.txt", 3, 3)
 
-	// LookupPath 命中
-	size, mtime, ok := idx.lookupPath("/sdcard/a.txt")
-	if !ok || size != 1 || mtime != 1 {
-		t.Fatalf("LookupPath 失败: %d %d %v", size, mtime, ok)
+	// LookupBatch 命中
+	sizes, mtimes, found := idx.LookupBatch([]string{"/sdcard/a.txt", "/sdcard/missing"})
+	if !found[0] || sizes[0] != 1 || mtimes[0] != 1 {
+		t.Fatalf("LookupBatch 失败: %d %d %v", sizes[0], mtimes[0], found[0])
 	}
-	if _, _, ok := idx.lookupPath("/sdcard/missing"); ok {
+	if found[1] {
 		t.Fatal("不存在的路径不应命中")
 	}
 

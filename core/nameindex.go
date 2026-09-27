@@ -14,7 +14,8 @@ import (
 // v0.2 增量扫描改造：
 //   - byPath 提供路径到文档的 O(1) 映射（原实现为 O(N) 全表扫描，
 //     全量索引十万文件时退化为 O(N^2)，是实测性能瓶颈）；
-//   - lookupPath / RemovePath / RemoveExcept 支撑"进入应用自动增量重扫"。
+//   - byPath 批量查重（LookupBatch）/ RemovePath / RemoveExcept
+//     支撑"进入应用自动增量重扫"。
 type NameIndex struct {
 	mu     sync.RWMutex
 	kind   string // "file" | "folder"，写入搜索结果的 Kind 字段
@@ -44,14 +45,32 @@ func NewNameIndex(kind string) *NameIndex {
 
 // Add 将一个名称加入索引；同路径重复加入会先移除旧记录（支持增量重扫）。
 func (n *NameIndex) Add(path string, size, mtime int64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.insertLocked(path, size, mtime)
+}
+
+// AddBatch 批量加入名称，语义与多次调用 Add 完全一致（同路径先删旧记录），
+// 但全程只获取一次写锁。扫描器按目录批量调用，把锁竞争开销摊薄一个数量级
+// （十万级文件全量建索引时，逐条 Add 的 8 协程锁竞争是实测热点）。
+func (n *NameIndex) AddBatch(items []nameRecord) {
+	if len(items) == 0 {
+		return
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, it := range items {
+		n.insertLocked(it.Path, it.Size, it.Mtime)
+	}
+}
+
+// insertLocked 插入一条记录（同路径先删旧记录）。调用方需持有写锁。
+func (n *NameIndex) insertLocked(path string, size, mtime int64) {
 	base := filepath.Base(path)
 	lower := strings.ToLower(base)
 	if lower == "" {
 		return
 	}
-
-	n.mu.Lock()
-	defer n.mu.Unlock()
 
 	// 去重：同一路径先删旧 gram 记录（O(1) 定位）
 	if id, ok := n.byPath[path]; ok {
@@ -73,24 +92,28 @@ func (n *NameIndex) Add(path string, size, mtime int64) {
 	}
 }
 
+// LookupBatch 批量查询路径的 size/mtime（增量扫描的变更检测依据），
+// 全程只获取一次读锁。未命中的槽位 found[i]=false。
+func (n *NameIndex) LookupBatch(paths []string) (sizes, mtimes []int64, found []bool) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	sizes = make([]int64, len(paths))
+	mtimes = make([]int64, len(paths))
+	found = make([]bool, len(paths))
+	for i, p := range paths {
+		if id, ok := n.byPath[p]; ok {
+			d := n.docs[id]
+			sizes[i], mtimes[i], found[i] = d.size, d.mtime, true
+		}
+	}
+	return sizes, mtimes, found
+}
+
 // Count 返回已索引条目数。
 func (n *NameIndex) Count() int64 {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return int64(len(n.docs))
-}
-
-// lookupPath 返回已索引条目的大小与修改时间（增量扫描的变更检测依据）。
-// 非导出：gobind 禁止多返回值签名，且该方法仅供包内增量扫描使用。
-func (n *NameIndex) lookupPath(path string) (size, mtime int64, ok bool) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-	id, ok := n.byPath[path]
-	if !ok {
-		return 0, 0, false
-	}
-	d := n.docs[id]
-	return d.size, d.mtime, true
 }
 
 // RemovePath 从索引移除一个路径；返回是否存在。
@@ -133,9 +156,23 @@ func (n *NameIndex) Reset() {
 
 // Search 按子串查询名称，结果按"名称更短优先、修改时间更新优先"排序。
 func (n *NameIndex) Search(q string, limit int) []FileHit {
-	ql := strings.ToLower(strings.TrimSpace(q))
-	if ql == "" || limit <= 0 {
+	hits, _ := n.searchAll(q)
+	if limit <= 0 {
 		return nil
+	}
+	if len(hits) > limit {
+		hits = hits[:limit]
+	}
+	return hits
+}
+
+// searchAll 返回全部命中（已排序，不截断），便于调用方统计真实命中总数
+// 并按配额二次切片。名称索引内部本就是"全量收集→排序→截断"，
+// 这里只是去掉截断这一步，没有额外的遍历开销。
+func (n *NameIndex) searchAll(q string) ([]FileHit, int) {
+	ql := strings.ToLower(strings.TrimSpace(q))
+	if ql == "" {
+		return nil, 0
 	}
 
 	n.mu.RLock()
@@ -144,7 +181,7 @@ func (n *NameIndex) Search(q string, limit int) []FileHit {
 	// bigram 倒排先收敛候选集，再对候选做精确子串校验。
 	candidates, ok := n.candidatesFor([]rune(ql))
 	if !ok {
-		return nil // 某个 bigram 无命中 => 不可能子串匹配
+		return nil, 0 // 某个 bigram 无命中 => 不可能子串匹配
 	}
 
 	hits := make([]FileHit, 0, 32)
@@ -169,10 +206,7 @@ func (n *NameIndex) Search(q string, limit int) []FileHit {
 		}
 		return hits[i].ModTime > hits[j].ModTime
 	})
-	if len(hits) > limit {
-		hits = hits[:limit]
-	}
-	return hits
+	return hits, len(hits)
 }
 
 // candidatesFor 计算查询词全部 bigram 的倒排交集（调用方需持有读锁）。

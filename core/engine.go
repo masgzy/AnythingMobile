@@ -303,7 +303,9 @@ func (e *Engine) CancelScan() { e.cancel.Store(true) }
 func (e *Engine) IsScanning() bool { return e.scanning.Load() }
 
 // Search 搜索文件名、目录名与文档全文，返回 SearchResponse 的 JSON。
-// 三类命中合并返回，宿主按 Kind / Matched 字段拆分到不同页签展示。
+// 三类命中合并返回，宿主按 Kind / Matched 字段拆分到不同页签展示；
+// 除返回条目外，还通过 TotalMatches / TotalFiles / TotalDirs / TotalContent
+// 上报各类的真实命中总数（不受返回条数上限影响），供 UI 展示真实计数。
 // gobind: search(String, long) String
 func (e *Engine) Search(query string, limit int64) (string, error) {
 	q := strings.TrimSpace(query)
@@ -314,35 +316,69 @@ func (e *Engine) Search(query string, limit int64) (string, error) {
 		limit = 300
 	}
 	start := time.Now()
-	hits := e.names.Search(q, int(limit))
-	// 目录命中按相同配额单独取，避免文件多时挤掉全部目录结果
-	dirHits := e.dirs.Search(q, int(limit))
-	hits = append(hits, dirHits...)
-	if len(hits) < int(limit) {
-		hits = append(hits, e.content.Search(q, int(limit)-len(hits))...)
-	}
-	// 外部扩展条目（如 Android/data）垫底补位：主索引优先展示。
-	if len(hits) < int(limit) {
-		e.extMu.RLock()
-		remaining := int(limit) - len(hits)
-		ext := e.extNames.Search(q, remaining)
-		if len(ext) < remaining {
-			ext = append(ext, e.extDirs.Search(q, remaining-len(ext))...)
-		}
-		e.extMu.RUnlock()
-		hits = append(hits, ext...)
-	}
+
+	// 各源全量取回（名称索引内部本就全量排序后再截断，这里只是去掉截断），
+	// 既用于统计真实总数，也用于按配额切片返回。
+	nameAll, _ := e.names.searchAll(q)
+	dirAll, _ := e.dirs.searchAll(q)
+	contAll, _ := e.content.searchAll(q)
+	e.extMu.RLock()
+	extNameAll, _ := e.extNames.searchAll(q)
+	extDirAll, _ := e.extDirs.searchAll(q)
+	e.extMu.RUnlock()
+
+	// 两轮配额分配（旧逻辑“文件名占满后全文/外部被饿死”已废弃）：
+	// 第一轮各源按份额上限取（文件名 50% / 全文 25% / 目录 15% / 外部 10%），
+	// 保证每个页签都有可见结果；第二轮把剩余额度按
+	// 文件名→全文→目录→外部 的优先级填满。
+	extAll := append(append([]FileHit{}, extNameAll...), extDirAll...)
+	hits := allocateHits(nameAll, contAll, dirAll, extAll, int(limit))
+
 	resp := SearchResponse{
-		Query:   q,
-		Elapsed: time.Since(start).Milliseconds(),
-		Total:   len(hits),
-		Hits:    hits,
+		Query:        q,
+		Elapsed:      time.Since(start).Milliseconds(),
+		Total:        len(hits),
+		TotalMatches: len(nameAll) + len(dirAll) + len(contAll) + len(extAll),
+		TotalFiles:   len(nameAll) + len(extNameAll),
+		TotalDirs:    len(dirAll) + len(extDirAll),
+		TotalContent: len(contAll),
+		Hits:         hits,
 	}
 	b, err := json.Marshal(resp)
 	if err != nil {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// allocateHits 两轮配额分配（算法见 Search 注释）。
+// 输入四个已排序的命中切片，返回不超过 limit 条的合并结果。
+func allocateHits(nameAll, contAll, dirAll, extAll []FileHit, limit int) []FileHit {
+	if limit <= 0 {
+		return nil
+	}
+	src := [4][]FileHit{nameAll, contAll, dirAll, extAll}
+	// 第一轮份额：50% / 25% / 15% / 10%
+	caps := [4]int{limit / 2, limit / 4, limit * 3 / 20, limit / 10}
+	taken := [4]int{}
+	out := make([]FileHit, 0, limit)
+	for i := range src {
+		n := min(len(src[i]), caps[i])
+		out = append(out, src[i][:n]...)
+		taken[i] = n
+	}
+	// 第二轮：剩余额度按优先级填满
+	for i := range src {
+		if len(out) >= limit {
+			break
+		}
+		n := min(len(src[i])-taken[i], limit-len(out))
+		if n > 0 {
+			out = append(out, src[i][taken[i]:taken[i]+n]...)
+			taken[i] += n
+		}
+	}
+	return out
 }
 
 // RemovePaths 宿主删除文件后同步移出索引，pathsJSON 为路径数组 JSON。
@@ -416,11 +452,17 @@ func safeCall(f func()) {
 }
 
 // SearchResponse Search 的返回结构。
+// Total 为本次返回的条目数；TotalMatches 及三个分类总数为索引内的
+// 真实命中数（不受返回上限影响），供 UI 展示“命中 N 项”的真实计数。
 type SearchResponse struct {
-	Query   string    `json:"query"`
-	Elapsed int64     `json:"elapsed_ms"`
-	Total   int       `json:"total"`
-	Hits    []FileHit `json:"hits"`
+	Query        string    `json:"query"`
+	Elapsed      int64     `json:"elapsed_ms"`
+	Total        int       `json:"total"`
+	TotalMatches int       `json:"total_matches"`
+	TotalFiles   int       `json:"total_files"`
+	TotalDirs    int       `json:"total_dirs"`
+	TotalContent int       `json:"total_content"`
+	Hits         []FileHit `json:"hits"`
 }
 
 // FileHit 一条搜索结果。
@@ -439,6 +481,15 @@ type FileHit struct {
 func (e *Engine) recordSeen(path string) {
 	e.seenMu.Lock()
 	e.seen[path] = struct{}{}
+	e.seenMu.Unlock()
+}
+
+// recordSeenBatch 增量模式下批量记录路径（一次锁获取处理整个目录的文件）。
+func (e *Engine) recordSeenBatch(paths []string) {
+	e.seenMu.Lock()
+	for _, p := range paths {
+		e.seen[p] = struct{}{}
+	}
 	e.seenMu.Unlock()
 }
 

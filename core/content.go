@@ -104,9 +104,20 @@ func (c *ContentStore) Count() int64 {
 
 // Search 朴素子串搜索，命中返回带上下文摘要的结果。
 func (c *ContentStore) Search(q string, limit int) []FileHit {
+	hits, _ := c.searchAll(q)
+	if limit > 0 && len(hits) > limit {
+		hits = hits[:limit]
+	}
+	return hits
+}
+
+// searchAll 返回全部命中（路径序稳定，不截断）与真实命中总数。
+// 与旧 Search 的差异只是不再提前 break：本来就要对全部文档做
+// strings.Index 扫描，省去的只是截断，统计总数无需二次遍历。
+func (c *ContentStore) searchAll(q string) ([]FileHit, int) {
 	ql := strings.ToLower(strings.TrimSpace(q))
-	if ql == "" || limit <= 0 {
-		return nil
+	if ql == "" {
+		return nil, 0
 	}
 
 	c.mu.RLock()
@@ -130,11 +141,8 @@ func (c *ContentStore) Search(q string, limit int) []FileHit {
 			Snippet: snippet(orig, idx, len(ql)),
 			Matched: "content",
 		})
-		if len(hits) >= limit {
-			break
-		}
 	}
-	return hits
+	return hits, len(hits)
 }
 
 // snippet 生成命中位置前后的摘要（前后各取 40 字符）。

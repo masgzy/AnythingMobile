@@ -83,7 +83,13 @@ func (e *Engine) saveSnapshot() error {
 	}
 
 	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
+	// BestSpeed：快照以"文本为主"（压缩比 4~6x vs 默认压缩的 5~8x），
+	// 但 CPU 开销降为约 1/3 —— 手机上落盘更快、更省电，
+	// 且扫描收尾后的落盘窗口与下一次扫描互斥（saveWG），越快越好。
+	zw, err := gzip.NewWriterLevel(&buf, gzip.BestSpeed)
+	if err != nil {
+		return err
+	}
 	if err := gob.NewEncoder(zw).Encode(snap); err != nil {
 		return err
 	}

@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/gob"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -492,4 +493,94 @@ func TestEnginePersistence(t *testing.T) {
 	e1.saveWG.Wait()
 	e2.saveWG.Wait()
 	e4.saveWG.Wait()
+}
+
+// allocateHits 两轮配额分配的行为锁定：
+//   - limit=10 时首轮份额为 文件名5 / 全文2 / 目录1 / 外部1；
+//   - 未用满的额度按 文件名→全文→目录→外部 二轮回填；
+//   - 各源不足额时全量返回；全文命中不会被海量文件名挤掉。
+func TestAllocateHitsQuota(t *testing.T) {
+	mk := func(n int, matched, kind string) []FileHit {
+		out := make([]FileHit, n)
+		for i := range out {
+			out[i] = FileHit{
+				Path:    fmt.Sprintf("/p/%s-%d", kind, i),
+				Name:    fmt.Sprintf("n%d", i),
+				Matched: matched,
+				Kind:    kind,
+			}
+		}
+		return out
+	}
+
+	names := mk(20, "name", "file")
+	dirs := mk(20, "name", "folder")
+	out := allocateHits(names, nil, dirs, nil, 10)
+	if len(out) != 10 {
+		t.Fatalf("应返回 limit 条: %d", len(out))
+	}
+	filesN, dirsN := 0, 0
+	for _, h := range out {
+		if h.Kind == "folder" {
+			dirsN++
+		} else {
+			filesN++
+		}
+	}
+	// 首轮 5 文件 + 1 目录，剩余 4 条二轮回填文件名 => 9:1
+	if filesN != 9 || dirsN != 1 {
+		t.Fatalf("配额分配异常: files=%d dirs=%d", filesN, dirsN)
+	}
+
+	// 各源都不足额时全量返回
+	out2 := allocateHits(mk(3, "name", "file"), mk(2, "content", ""), mk(1, "name", "folder"), nil, 100)
+	if len(out2) != 6 {
+		t.Fatalf("不足 limit 应全量返回: %d", len(out2))
+	}
+
+	// 全文命中不被文件名挤掉（旧实现文件名占满后全文为 0 条）：
+	// limit=12 时全文首轮份额 12/4=3 条全部保留
+	out3 := allocateHits(mk(50, "name", "file"), mk(3, "content", ""), nil, nil, 12)
+	contentN := 0
+	for _, h := range out3 {
+		if h.Matched == "content" {
+			contentN++
+		}
+	}
+	if contentN != 3 {
+		t.Fatalf("全文命中应保留首轮份额: %d", contentN)
+	}
+}
+
+// Search 上报的真实命中总数不受返回上限影响：
+// 400 个文件名命中 + 1 个目录命中 + 1 个全文命中，limit=10 时
+// 仍应报告 total_matches=402 及分类真实计数。
+func TestSearchRealTotals(t *testing.T) {
+	e, err := NewEngine(2, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 400; i++ {
+		e.names.Add(fmt.Sprintf("/sdcard/日志%d.txt", i), 1, 1)
+	}
+	e.dirs.Add("/sdcard/日志备份", 0, 1)
+	if err := e.content.Add("/sdcard/正文.txt", "日志 关键词正文"); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := e.Search("日志", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sr SearchResponse
+	if err := json.Unmarshal([]byte(resp), &sr); err != nil {
+		t.Fatal(err)
+	}
+	if sr.Total != 10 {
+		t.Fatalf("返回条数应为 limit: %d", sr.Total)
+	}
+	if sr.TotalMatches != 402 || sr.TotalFiles != 400 || sr.TotalDirs != 1 || sr.TotalContent != 1 {
+		t.Fatalf("真实总数异常: matches=%d files=%d dirs=%d content=%d",
+			sr.TotalMatches, sr.TotalFiles, sr.TotalDirs, sr.TotalContent)
+	}
 }

@@ -50,9 +50,11 @@ var docExts = map[string]bool{
 func (e *Engine) traverse(roots []string, incremental bool) bool {
 	w := &dirWalker{e: e, incremental: incremental}
 	w.cond = sync.NewCond(&w.mu)
+	var rootDirs []nameRecord
 	for _, root := range roots {
 		// root 本身可能是文件
-		if info, err := os.Stat(root); err == nil && !info.IsDir() {
+		info, err := os.Stat(root)
+		if err == nil && !info.IsDir() {
 			if !e.cancel.Load() {
 				if incremental {
 					e.recordSeen(root)
@@ -62,8 +64,13 @@ func (e *Engine) traverse(roots []string, incremental bool) bool {
 			}
 			continue
 		}
+		if err == nil {
+			// 根目录自身也入目录名索引（旧实现由 addDir 在处理到该目录时补上）
+			rootDirs = append(rootDirs, nameRecord{Path: root, Mtime: info.ModTime().UnixMilli()})
+		}
 		w.push(root)
 	}
+	e.dirs.AddBatch(rootDirs)
 	w.run(e.workers)
 	return e.cancel.Load()
 }
@@ -166,7 +173,13 @@ func (w *dirWalker) walkDir(dir string) {
 	if w.incremental {
 		e.recordSeen(dir)
 	}
-	e.addDir(dir)
+
+	var (
+		filePaths []string
+		fileInfos []fs.FileInfo
+		subPaths  []string
+		subMtimes []int64
+	)
 	for _, child := range entries {
 		if e.cancel.Load() {
 			w.stop()
@@ -178,6 +191,12 @@ func (w *dirWalker) walkDir(dir string) {
 			if filterDir(sub, name) {
 				continue
 			}
+			// 子目录 mtime 在父目录 ReadDir 结果上取一次 lstat，
+			// 不再像旧 addDir 那样处理到该目录时再 stat 一次。
+			if info, err := child.Info(); err == nil {
+				subPaths = append(subPaths, sub)
+				subMtimes = append(subMtimes, info.ModTime().UnixMilli())
+			}
 			w.push(sub)
 			continue
 		}
@@ -186,24 +205,34 @@ func (w *dirWalker) walkDir(dir string) {
 		}
 		info, err := child.Info()
 		if err != nil {
-			return
+			continue // 竞态删除等瞬时错误只跳过该文件，不放弃整个目录
 		}
-		e.handleFile(sub, info, w.incremental)
-		if w.incremental {
-			e.recordSeen(sub)
-		}
-		n := e.files.Add(1)
-		if n%200 == 0 {
-			e.notifyProgress("scan", n)
-		}
+		filePaths = append(filePaths, sub)
+		fileInfos = append(fileInfos, info)
+	}
+
+	// 批量收录子目录 + 批量入文件名索引：每目录各一次锁获取，
+	// 替代旧实现每条目 2~3 次（多协程下的锁竞争热点）。
+	e.dirs.AddBatch(makeDirRecords(subPaths, subMtimes))
+	e.processFileBatch(filePaths, fileInfos, w.incremental)
+	if w.incremental {
+		e.recordSeenBatch(filePaths)
+	}
+	if n := e.files.Add(int64(len(filePaths))); n%200 < int64(len(filePaths)) {
+		e.notifyProgress("scan", n)
 	}
 }
 
-// addDir 将目录加入目录名索引（供"目录名"页签搜索）。
-func (e *Engine) addDir(path string) {
-	if info, err := os.Stat(path); err == nil {
-		e.dirs.Add(path, 0, info.ModTime().UnixMilli())
+// makeDirRecords 把子目录路径与 mtime 组装为目录索引的批量条目。
+func makeDirRecords(paths []string, mtimes []int64) []nameRecord {
+	if len(paths) == 0 {
+		return nil
 	}
+	recs := make([]nameRecord, len(paths))
+	for i := range paths {
+		recs[i] = nameRecord{Path: paths[i], Mtime: mtimes[i]}
+	}
+	return recs
 }
 
 // filterDir 目录过滤规则；返回 true 表示跳过该目录。
@@ -239,44 +268,83 @@ func safeExtract(path string) (text string, err error) {
 // 则直接跳过（仅保留进度计数），实现秒级增量重扫。
 // 特例：名称未变但全文缺失（如上次快照保存不完整）的文档会自动补解析，
 // 保证名称索引与全文库最终一致。
+// 仅用于"扫描根本身是文件"的单文件入口；目录内文件走 processFileBatch。
 func (e *Engine) handleFile(path string, info fs.FileInfo, incremental bool) {
-	size := info.Size()
-	mtime := info.ModTime().UnixMilli()
-	ext := extOf(path)
+	e.processFileBatch([]string{path}, []fs.FileInfo{info}, incremental)
+}
 
+// processFileBatch 批量处理一组文件（一个目录的直接子文件）：
+// 增量模式先用一次读锁批量查重，size/mtime 均未变化的文件直接跳过
+// （实现秒级增量重扫）；需要入索引的条目用一次写锁批量插入，
+// 随后逐个解析可读文档的全文。旧实现逐文件获取 2~3 次索引锁，
+// 八协程并发扫描十万级文件时锁竞争明显，按目录合并后降为每目录 2 次。
+func (e *Engine) processFileBatch(paths []string, infos []fs.FileInfo, incremental bool) {
+	if len(paths) == 0 {
+		return
+	}
+	type addItem struct {
+		path  string
+		size  int64
+		mtime int64
+		parse bool // 是否为可解析文档（需要全文处理）
+	}
+	adds := make([]addItem, 0, len(paths))
+
+	// 增量模式：一次读锁批量查重（旧实现逐文件 lookupPath，
+	// 每个文件一次 RLock，多协程下是锁竞争热点）。
+	var sizes, mtimes []int64
+	var found []bool
 	if incremental {
-		oldSize, oldMtime, had := e.names.lookupPath(path)
-		if had && oldSize == size && oldMtime == mtime {
-			if !docExts[ext] || e.content.Has(path) {
-				return // 未变化：跳过索引与文档解析
-			}
-			// 名称未变但全文缺失：仅补解析正文，不重复计数
-			e.docsFound.Add(1)
-			if size <= maxParseSize && size > 0 {
-				e.parseAndStore(path, ext)
-			}
-			return
-		}
-		if had {
-			e.updated.Add(1)
-		} else {
-			e.added.Add(1)
-		}
+		sizes, mtimes, found = e.names.LookupBatch(paths)
 	}
 
-	e.names.Add(path, size, mtime)
+	for i, path := range paths {
+		size := infos[i].Size()
+		mtime := infos[i].ModTime().UnixMilli()
+		ext := extOf(path)
 
-	if !docExts[ext] {
+		if incremental {
+			if found[i] && sizes[i] == size && mtimes[i] == mtime {
+				// 未变化：仅当名称在索引但全文缺失时补解析（快照不完整兜底）
+				if docExts[ext] && !e.content.Has(path) {
+					e.docsFound.Add(1)
+					if size <= maxParseSize && size > 0 {
+						e.parseAndStore(path, ext)
+					}
+				}
+				continue
+			}
+			if found[i] {
+				e.updated.Add(1)
+			} else {
+				e.added.Add(1)
+			}
+		}
+
+		adds = append(adds, addItem{path: path, size: size, mtime: mtime, parse: docExts[ext]})
+	}
+	if len(adds) == 0 {
 		return
 	}
-	e.docsFound.Add(1)
-	if size > maxParseSize || size == 0 {
-		return
-	}
 
-	// 变更文件先移除旧全文，避免占双份容量
-	e.content.Remove(path)
-	e.parseAndStore(path, ext)
+	records := make([]nameRecord, len(adds))
+	for i, it := range adds {
+		records[i] = nameRecord{Path: it.path, Size: it.size, Mtime: it.mtime}
+	}
+	e.names.AddBatch(records)
+
+	for _, it := range adds {
+		if !it.parse {
+			continue
+		}
+		e.docsFound.Add(1)
+		if it.size > maxParseSize || it.size == 0 {
+			continue
+		}
+		// 变更文件先移除旧全文，避免占双份容量
+		e.content.Remove(it.path)
+		e.parseAndStore(it.path, extOf(it.path))
+	}
 }
 
 // parseAndStore 按扩展名选择解析通道（内置 OOXML / 宿主兜底 / 暂不支持），
@@ -301,7 +369,11 @@ func (e *Engine) parseAndStore(path, ext string) {
 		return
 	}
 	if e.content.Add(path, text) == nil {
-		e.docsIndexed.Add(1)
+		// 文档解析阶段单独上报进度（phase="index"）：大文档解析期间
+		// 文件计数会停顿，宿主据此显示"正在解析文档"而非卡住的扫描数。
+		if n := e.docsIndexed.Add(1); n%5 == 0 {
+			e.notifyProgress("index", n)
+		}
 	}
 }
 

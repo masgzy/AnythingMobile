@@ -27,6 +27,23 @@ data class UiHit(
     val isFolder: Boolean get() = kind == "folder"
 }
 
+/** 一次搜索的解析结果（引擎 JSON → UI 状态的中间载体）。 */
+private data class SearchResult(
+    val hits: List<UiHit>,
+    val elapsed: Long,
+    val totalMatches: Long,
+    val totalFiles: Long,
+    val totalDirs: Long,
+    val totalContent: Long,
+)
+
+/**
+ * 单次搜索返回的条目上限（引擎侧允许的最大值也是 1000）。
+ * 返回条数只影响列表可见范围；真实命中数由引擎 total_* 字段上报，
+ * 页签计数与列表截断提示都以真实总数为准。
+ */
+private const val SEARCH_LIMIT = 1000
+
 /** 索引/扫描阶段。 */
 enum class ScanPhase { IDLE, FIRST_BUILD, UPDATING }
 
@@ -42,6 +59,11 @@ data class EngineUiState(
     /** 引擎返回的全部命中（文件名/目录/全文三类混合），UI 按 Tab 拆分展示。 */
     val hits: List<UiHit> = listOf(),
     val elapsedMs: Long = 0,
+    /** 各类命中的真实总数（不受返回条数上限影响），供页签展示真实计数。 */
+    val totalMatches: Long = 0,
+    val totalFiles: Long = 0,
+    val totalDirs: Long = 0,
+    val totalContent: Long = 0,
     /** 最近一次扫描摘要（用于"索引更新完成"提示）。 */
     val lastSummary: ScanSummary? = null,
     val statusText: String = "就绪",
@@ -93,9 +115,13 @@ class EngineRepository(context: Context) {
 
     private val listener = object : ProgressListener {
             override fun onProgress(phase: String?, done: Long) {
+                // phase="index"：文档解析阶段（大文档解析期间文件计数会停顿，
+                // 单独上报让用户看到进展而非卡住的扫描数）
+                val text = if (phase == "index") "正在解析文档内容… 已解析 $done 篇"
+                else "更新索引中… 已扫描 $done 项"
                 _state.value = _state.value.copy(
                     scanned = done,
-                    statusText = "更新索引中… 已扫描 $done 项",
+                    statusText = text,
                 )
             }
 
@@ -224,37 +250,59 @@ class EngineRepository(context: Context) {
     }.getOrDefault(0)
 
     /** 搜索三类命中（文件名/目录名/全文），合并返回。 */
-    fun search(query: String) {
+    suspend fun search(query: String) {
         val eng = engine
         if (query.isBlank() || eng == null) {
             _state.value = _state.value.copy(query = query, hits = emptyList())
             return
         }
-        runCatching { eng.search(query, 300) }.onSuccess { json ->
-            val hits = mutableListOf<UiHit>()
-            var elapsed = 0L
-            runCatching {
-                val obj = JSONObject(json)
-                elapsed = obj.optLong("elapsed_ms")
-                val arr = obj.optJSONArray("hits") ?: JSONArray()
-                for (i in 0 until arr.length()) {
-                    val h = arr.getJSONObject(i)
-                    hits.add(
-                        UiHit(
-                            path = h.optString("path"),
-                            name = h.optString("name"),
-                            size = h.optLong("size"),
-                            mtime = h.optLong("mtime"),
-                            matched = h.optString("matched", "name"),
-                            kind = h.optString("kind", "file"),
-                            snippet = h.optString("snippet"),
+        // 引擎调用 + 千条级 JSON 解析都在 Default 线程执行，不占主线程
+        val parsed = withContext(Dispatchers.Default) {
+            runCatching { eng.search(query, SEARCH_LIMIT) }.map { json ->
+                val hits = mutableListOf<UiHit>()
+                var elapsed = 0L
+                var totalMatches = 0L
+                var totalFiles = 0L
+                var totalDirs = 0L
+                var totalContent = 0L
+                runCatching {
+                    val obj = JSONObject(json)
+                    elapsed = obj.optLong("elapsed_ms")
+                    totalMatches = obj.optLong("total_matches")
+                    totalFiles = obj.optLong("total_files")
+                    totalDirs = obj.optLong("total_dirs")
+                    totalContent = obj.optLong("total_content")
+                    val arr = obj.optJSONArray("hits") ?: JSONArray()
+                    for (i in 0 until arr.length()) {
+                        val h = arr.getJSONObject(i)
+                        hits.add(
+                            UiHit(
+                                path = h.optString("path"),
+                                name = h.optString("name"),
+                                size = h.optLong("size"),
+                                mtime = h.optLong("mtime"),
+                                matched = h.optString("matched", "name"),
+                                kind = h.optString("kind", "file"),
+                                snippet = h.optString("snippet"),
+                            )
                         )
-                    )
+                    }
                 }
+                SearchResult(hits, elapsed, totalMatches, totalFiles, totalDirs, totalContent)
             }
+        }
+        parsed.onSuccess { r ->
             _state.value = _state.value.copy(
-                query = query, hits = hits, elapsedMs = elapsed,
-                statusText = if (hits.isEmpty()) "无结果" else "命中 ${hits.size} 项 · $elapsed ms",
+                query = query, hits = r.hits, elapsedMs = r.elapsed,
+                totalMatches = r.totalMatches, totalFiles = r.totalFiles,
+                totalDirs = r.totalDirs, totalContent = r.totalContent,
+                statusText = when {
+                    r.hits.isEmpty() -> "无结果"
+                    // 命中数超过返回上限时如实说明截断情况
+                    r.totalMatches > r.hits.size ->
+                        "命中 ${r.totalMatches} 项（显示前 ${r.hits.size}）· ${r.elapsed} ms"
+                    else -> "命中 ${r.totalMatches} 项 · ${r.elapsed} ms"
+                },
             )
         }.onFailure {
             _state.value = _state.value.copy(query = query, hits = emptyList())
