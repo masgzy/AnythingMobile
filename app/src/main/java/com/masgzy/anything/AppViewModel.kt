@@ -63,7 +63,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var refreshingAndroidData = false
 
     init {
-        ShizukuAccess.init()
+        ShizukuAccess.init(application)
         viewModelScope.launch {
             queryFlow.debounce(150).collect { repo.search(it) }
         }
