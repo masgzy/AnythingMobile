@@ -18,9 +18,9 @@ var ErrUnsupportedFormat = errors.New("core: 暂不支持该格式的正文抽�
 // maxExtractText 单文档抽取文本的上限（1MB），超出截断。
 const maxExtractText = 1 << 20
 
-// ExtractText 抽取 OOXML 家族（docx/pptx/xlsx）文档的纯文本。
-// 仅依赖标准库（zip + encoding/xml），避免任何 GPL/AGPL 依赖。
-// .doc/.ppt/.xls 由宿主 ExternalParser 兜底；.pdf 在 M3 里程碑接入。
+// ExtractText 抽取内置支持格式（docx/pptx/xlsx/pdf）文档的纯文本。
+// OOXML 家族仅依赖标准库（zip + encoding/xml）；PDF 走 ledongthuc/pdf
+// （BSD-3）。.doc/.ppt/.xls 由宿主 ExternalParser 兜底（见 external.go）。
 func ExtractText(path string) (string, error) {
 	switch strings.ToLower(pathExt(path)) {
 	case ".docx":
@@ -29,6 +29,8 @@ func ExtractText(path string) (string, error) {
 		return extractPptx(path)
 	case ".xlsx":
 		return extractXlsx(path)
+	case ".pdf":
+		return extractPDF(path)
 	default:
 		return "", ErrUnsupportedFormat
 	}

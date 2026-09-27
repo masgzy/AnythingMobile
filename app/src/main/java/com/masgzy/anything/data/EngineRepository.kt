@@ -96,12 +96,38 @@ data class ScanSummary(
  *
  * 索引持久化（v0.3）：引擎指向 filesDir/engine_index，扫描收尾自动落盘，
  * 下次启动构造即恢复 —— 打开即可搜索，不再每次全量重建。
+ * 全文索引（alpha14）：正文由 Go 侧 bleve scorch 持久化（filesDir/engine_index/fts）。
  *
  * 引擎 API（gobind lowerCamelCase 映射）：
  *   Engine(workers, dataDir) / setListener / startScan(optionsJson) /
  *   search(q, limit) / removePaths(pathsJson) / cancelScan / isScanning / stats
  */
 class EngineRepository(context: Context) {
+
+    companion object {
+        /**
+         * 进程级共享引擎。底层 scorch（bbolt）对索引目录持有文件锁：
+         * 同目录出现第二个 Engine 实例会等锁失败导致全文索引降级，
+         * 因此引擎必须单实例 —— Activity/ViewModel 重建一律复用。
+         */
+        @Volatile
+        private var sharedEngine: Engine? = null
+        private val engineLock = Any()
+
+        fun acquireEngine(context: Context): Engine? {
+            sharedEngine?.let { return it }
+            synchronized(engineLock) {
+                sharedEngine?.let { return it }
+                val eng = runCatching {
+                    Engine(0, File(context.applicationContext.filesDir, "engine_index").absolutePath)
+                }.onFailure { t ->
+                    android.util.Log.e("AnythingEngine", "Go 引擎初始化失败", t)
+                }.getOrNull()
+                if (eng != null) sharedEngine = eng
+                return eng
+            }
+        }
+    }
 
     private val appContext = context.applicationContext
 
@@ -162,11 +188,7 @@ class EngineRepository(context: Context) {
         // 大索引（十万级条目）时避免阻塞主线程。就绪后置 ready=true，
         // ViewModel 监听该状态翻转并触发首次自动增量扫描。
         Thread {
-            val eng = runCatching {
-                Engine(0, File(appContext.filesDir, "engine_index").absolutePath)
-            }.onFailure { t ->
-                android.util.Log.e("AnythingEngine", "Go 引擎初始化失败", t)
-            }.getOrNull()
+            val eng = acquireEngine(appContext)
             engine = eng
             eng?.setListener(listener)
             // 旧版 Office（.doc/.xls/.ppt/.wps）宿主侧解析兜底；

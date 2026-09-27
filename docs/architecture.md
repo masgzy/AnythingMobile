@@ -51,9 +51,10 @@ JSON 字符串与进度回调，规避 gobind 的类型限制与调用开销。
 | `StartScan(json)` | `engine.startScan(json)` |
 | `CancelScan()` | `engine.cancelScan()` |
 | `IsScanning()` | `engine.isScanning()` |
-| `Search(q, 100)` | `engine.search(q, 100)` |
+| `Search(q, 100)` | `engine.search(q, 100)`（支持 `type:` `dir:` 语法） |
 | `AddDocumentText(p, t)` | `engine.addDocumentText(p, t)` |
 | `Stats()` | `engine.stats()` |
+| `Close()` | `engine.close()`（测试收尾；进程内通常无需调用） |
 | `ProgressListener` | `object : ProgressListener { onProgress/onFinished/onError }` |
 | `ExternalParser` | `object : ExternalParser { extractText(p) }` |
 
@@ -91,23 +92,42 @@ Search(q, limit)
 - 单字符查询退化为线性扫描（万级文件名 <10ms）。
 - 同路径重复 Add 会先删旧记录，天然支持增量重扫。
 
-### ContentStore（v0 → M3）
+### ContentStore（M3 已落地：bleve v2 + gse）
 
-v0 为内存朴素实现（64MB 上限、子串匹配、命中摘要），
-接口与 `Search`/`Add` 保持稳定；M3 替换为
-**bleve v2（Apache-2.0）+ gse 中文分词（Apache-2.0）** 的持久化索引，
-索引文件落盘应用私有目录，启动时增量加载。
+alpha14 起（`core/fts.go`）替换为 **bleve v2（Apache-2.0，scorch 持久化段格式）+
+gse 中文分词（Apache-2.0）** 的持久化倒排索引，落盘应用私有目录
+`filesDir/engine_index/fts`。接口与 `Search`/`Add` 保持稳定，Engine 无感替换。
+
+字段设计（见 `core/ftsanalyzer.go`）：
+
+| 字段 | 分词 | 用途 |
+|------|------|------|
+| `big` | 字符级 unigram+bigram（小写） | 候选集收敛（各 bigram 倒排求交） |
+| `words` | gse 中文分词（精简词典 ~11 万词条，`core/data/dict_zh_min.txt`） | 词边界相关性加权（整词命中 ×4 加分） |
+| `text` | 不索引，仅存储（scorch snappy 压缩） | 精确校验与命中摘要的文本来源 |
+
+搜索语义：连续词保持 v0 的"精确子串"（bigram 交集收敛 → 存储文本
+`strings.Index` 校验，无假阳性）；空白分词后多词 AND；单字直查 unigram。
+全文命中不再常驻内存（v0 为 64MB 上限的全量缓存），启动时从索引
+枚举文档 ID 集（`DocIDReaderAll`）作为 Has/RemoveExcept 的事实源。
+
+持久化与一致性：scorch 异步落盘，进程崩溃丢失的最后一批文档由
+增量扫描的"名称在而全文缺失 → 补解析"机制自愈；快照 v3 只保存
+名称/目录/外部条目（体积降到 KB 级），v2 旧快照解码时 Contents 字段
+被 gob 忽略，正文随首次扫描自动重建。底层 bbolt 对索引目录持
+文件锁 —— 同目录双开会等锁超时（3s）降级而非挂死，Kotlin 侧以
+进程级单例杜绝二次创建。
 
 ## 4. 文档正文抽取
 
 | 格式 | 方案 | 阶段 |
 |------|------|------|
 | .docx / .pptx / .xlsx | 标准库 zip+xml 流式抽取（`core/docparse.go`），零三方依赖 | ✅ M1 |
-| .pdf | ledongthuc/pdf（BSD-3） | M3 |
-| .doc / .ppt / .xls / .wps | **Kotlin 层 POI 兜底**：宿主实现 `ExternalParser.extractText()` 并 `setExternalParser` 注册；POI 依赖用 `poi-scratchpad` 精简引入（约 +3MB，按需） | M2 决策 |
+| .pdf | ledongthuc/pdf（BSD-3）；`core/pdfparse.go` 用其导出底层原语自实现内容流遍历，修复上游对中文 CID 字体（UniGB-UCS2-H）奇数字节串的 panic | ✅ alpha14 |
+| .doc / .ppt / .xls / .wps | **Kotlin 层自研解析器**（`data/office/`：CFB 容器 + Word 词片表 + Excel SST + PPT 记录树，零三方依赖），经 `ExternalParser.extractText()` 注入引擎 —— 优于 POI 方案（+0MB 依赖） | ✅ alpha13 |
 
-> POI 兜底接口设计为可选注入：不上传任何解析依赖时引擎照常工作，
-> 只是旧格式文档不参与全文索引（文件名搜索不受影响）。
+> ExternalParser 为可选注入：未注册时引擎照常工作，只是旧格式
+> 文档不参与全文索引（文件名搜索不受影响）。
 
 ## 5. Android 权限策略
 
@@ -139,9 +159,9 @@ v0 为内存朴素实现（64MB 上限、子串匹配、命中摘要），
 | 里程碑 | 内容 | 状态 |
 |--------|------|------|
 | M1 | 骨架：引擎 API/遍历/文件名索引/OOXML 抽取/外壳 UI/CI | ✅ |
-| M2 | 真机联调、增量重扫节流、POI 兜底决策、旧格式接入 | ⬜ |
-| M3 | bleve+gse 持久化全文索引、PDF 抽取、索引落盘与启动恢复 | ⬜ |
-| M4 | 搜索语法（`type:` `dir:` 过滤）、体验打磨、发布渠道 | ⬜ |
+| M2 | 真机联调、增量重扫节流（alpha10/11）、旧格式接入决策（自研替代 POI）、旧格式接入（alpha13） | ✅ |
+| M3 | bleve+gse 持久化全文索引、PDF 抽取、索引落盘与启动恢复 | ✅ alpha14 |
+| M4 | 搜索语法（`type:` `dir:` 过滤）、体验打磨、发布渠道 | 语法 ✅ alpha14；F-Droid ⬜ |
 
 ## 8. 许可
 

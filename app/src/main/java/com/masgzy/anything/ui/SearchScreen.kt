@@ -683,6 +683,12 @@ private fun AppDrawer(
                     selected = false,
                     onClick = onAbout,
                 )
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Spacer(Modifier.height(12.dp))
+                Text("搜索语法", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(8.dp))
+                SearchSyntaxHints()
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Text(
@@ -693,6 +699,39 @@ private fun AppDrawer(
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 16.dp),
             )
+        }
+    }
+}
+
+/** 搜索语法速查（M4）：抽屉内的紧凑说明列表。 */
+@Composable
+private fun SearchSyntaxHints() {
+    val items = listOf(
+        "type:视频 / 音乐 / 图片 / 文档 / 文件" to "限定文件类别",
+        "dir:Download 报告" to "限定所在目录（可多级 AND）",
+        "合同 模板" to "空格分隔多个词，需同时包含",
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        items.forEach { (syntax, desc) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                ) {
+                    Text(
+                        syntax,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    desc,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

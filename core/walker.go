@@ -12,9 +12,9 @@ import (
 // maxParseSize 单个文档参与全文解析的大小上限（20MB）。
 const maxParseSize = 20 << 20
 
-// builtInParsable 引擎内置解析器支持的扩展名（OOXML 家族）。
+// builtInParsable 引擎内置解析器支持的扩展名（OOXML 家族 + PDF）。
 var builtInParsable = map[string]bool{
-	".docx": true, ".pptx": true, ".xlsx": true,
+	".docx": true, ".pptx": true, ".xlsx": true, ".pdf": true,
 }
 
 // legacyDocExts 旧版二进制 Office 格式：优先交给宿主 ExternalParser 兜底。
@@ -369,7 +369,6 @@ func (e *Engine) parseAndStore(path, ext string) {
 			text, err = e.parseExternal(path)
 		}
 	default:
-		// .pdf 等：后续里程碑接入，当前仅计入 docsFound
 		return
 	}
 	if err != nil || strings.TrimSpace(text) == "" {

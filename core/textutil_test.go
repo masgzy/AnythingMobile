@@ -84,7 +84,7 @@ func TestSnippetRuneAlignment(t *testing.T) {
 
 // TestContentStoreToLowerOffsetFallback 大小写转换改变字节长度时摘要不越界不乱码。
 func TestContentStoreToLowerOffsetFallback(t *testing.T) {
-	cs := NewContentStore()
+	cs := NewContentStore(t.TempDir())
 	// U+0130 (İ) ToLower 后变为 i+U+0307，字节长度 2→3
 	orig := "İ" + strings.Repeat("甲", 45) + "needle" + strings.Repeat("乙", 45)
 	if err := cs.Add("/t.docx", orig); err != nil {
@@ -104,7 +104,7 @@ func TestContentStoreToLowerOffsetFallback(t *testing.T) {
 
 // TestContentStoreSanitizeOnAdd 入库统一清洗：PUA/控制符不进内容库。
 func TestContentStoreSanitizeOnAdd(t *testing.T) {
-	cs := NewContentStore()
+	cs := NewContentStore(t.TempDir())
 	if err := cs.Add("/x.docx", "正文\uF0B7带符号\x0b继续"); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -115,7 +115,25 @@ func TestContentStoreSanitizeOnAdd(t *testing.T) {
 	if strings.ContainsRune(hits[0].Snippet, 0xF0B7) || strings.ContainsRune(hits[0].Snippet, '\v') {
 		t.Errorf("摘要含未清洗字符: %q", hits[0].Snippet)
 	}
-	if strings.ContainsRune(cs.orig["/x.docx"], 0xF0B7) {
-		t.Errorf("原文库含 PUA 字符")
+	// v3：原文存储于 bleve stored 字段，读取后校验清洗确实生效
+	if stored, ok := fetchStored(t, cs, "/x.docx"); !ok {
+		t.Fatalf("存储正文缺失")
+	} else if strings.ContainsRune(stored, 0xF0B7) {
+		t.Errorf("存储正文含 PUA 字符")
 	}
+}
+
+// fetchStored 从 FTS 索引读取文档存储正文（测试白盒辅助）。
+func fetchStored(t *testing.T, cs *ContentStore, path string) (string, bool) {
+	t.Helper()
+	adv, err := cs.idx.Advanced()
+	if err != nil {
+		t.Fatalf("Advanced: %v", err)
+	}
+	reader, err := adv.Reader()
+	if err != nil {
+		t.Fatalf("Reader: %v", err)
+	}
+	defer reader.Close()
+	return fetchStoredText(reader, path)
 }

@@ -27,7 +27,9 @@ Go 高性能内核 × Kotlin Compose 原生外壳 · **完全离线 · 无广告
 |------|------|
 | 三页签搜索 | 文件名 / office 文档正文 / 目录名，与原版 Anything 一致 |
 | 文件名秒搜 | 2-gram 倒排索引，边输入边出结果 |
-| 文档全文搜索 | docx / xlsx / pptx 正文内容也能搜（PDF 支持在计划中） |
+| 文档全文搜索 | docx / xlsx / pptx / pdf 正文内容也能搜；旧版 .doc / .xls / .ppt / .wps 由内置解析器兜底 |
+| 持久化全文索引 | bleve + gse 中文分词的倒排索引落盘应用私有目录，启动秒级恢复，正文不再占用运行内存 |
+| 搜索语法 | `type:视频` 限定类别、`dir:Download` 限定目录、空格分隔多词（详见抽屉"搜索语法"） |
 | 自动更新索引 | 每次打开应用自动增量扫描，有变动才重解析，秒级完成；提示"更新索引中… / 索引更新完成" |
 | 类别快筛 | 底部圆钮一键筛选：视频 / 音乐 / 图片 / 文档；office 页可筛 Word / Excel / PPT |
 | 结果管理 | 点击看详情（位置/大小/时间）、直接打开或发送，长按多选批量删除 |
@@ -42,8 +44,18 @@ Go 高性能内核 × Kotlin Compose 原生外壳 · **完全离线 · 无广告
 
 ### 正式版（推荐）
 
-首个版本 **v1.0.0-alpha1** 正在筹备中，发布后可直接在
-[Releases](https://github.com/masgzy/AnythingMobile/releases) 页面下载 APK 安装。
+在 [Releases](https://github.com/masgzy/AnythingMobile/releases) 页面下载对应机型的 APK 安装
+（当前处于 alpha 阶段，功能快速迭代中）：
+
+| 文件 | 适合谁 |
+|------|--------|
+| `AnythingMobile-…-arm64-v8a.apk` | 2016 年后的绝大多数手机（推荐） |
+| `AnythingMobile-…-armeabi-v7a.apk` | 更早期的 32 位手机 |
+| `AnythingMobile-…-x86_64.apk` | 模拟器 / ChromeOS 设备 |
+| `AnythingMobile-…-universal.apk` | 不确定就选它，通吃所有机型（体积稍大） |
+
+> **升级提示**：v1.0.0-alpha12 起改用正式证书签名，此后可覆盖升级；
+> 从 alpha11 及更早版本升级需先卸载旧版。
 
 ### 体验版（CI 构建）
 
@@ -82,12 +94,18 @@ Android 11+ 把 `/sdcard/Android/data` 对普通应用隔离，需借助特权�
 （可在 AndroidManifest.xml 中验证，安装后也可在系统应用信息里查看权限列表），
 所有数据 100% 保留在你的设备上。
 
-**为什么搜不到 .doc / .ppt / .xls 的内容？**
-旧版 Office 二进制格式的正文解析正在计划中。这些文件的**文件名**始终可以搜到，
-新版 Office（docx / pptx / xlsx）的正文已支持全文搜索。
+**能搜索旧版 Office（.doc / .xls / .ppt）的内容吗？**
+能。应用内置了旧版二进制格式的解析器（无需任何额外权限与组件），
+.doc / .xls / .ppt / .wps 与新版 Office、PDF 一样参与全文搜索。
+个别加密或损坏文档解析失败时，其文件名仍可正常搜索。
 
 **会常驻后台耗电吗？**
 不会。只有你打开应用时才增量更新索引（仅扫描变动部分），平时没有任何后台活动。也可在设置中关闭自动更新。
+
+**搜索语法怎么用？**
+在搜索框中混用：`type:视频 家人` 只搜视频类文件、`dir:Download 合同`
+只搜 Download 目录下的文件、`年度 报告`（空格分隔）要求同时包含两个词。
+完整速查见应用抽屉菜单的"搜索语法"。
 
 **搜索结果是最新的吗？**
 是。每次进入应用都会自动增量扫描：新增、修改、删除的文件都会同步到索引，完成后会提示"索引更新完成"。
@@ -96,8 +114,10 @@ Android 11+ 把 `/sdcard/Android/data` 对普通应用隔离，需借助特权�
 
 - [x] M1 骨架：Go 引擎 + Compose 外壳 + CI 自动构建
 - [x] M2 增量重扫：进入应用自动更新索引 + "索引更新完成"提示；目录名搜索；多选/详情/删除；外观设置（对齐 ImageToolbox）
-- [ ] M3 bleve + gse 持久化全文索引、PDF 文本抽取
-- [ ] M4 搜索语法（类型 / 目录过滤）、F-Droid 分发
+- [x] M2.5 旧版 Office：.doc / .xls / .ppt / .wps 正文解析下沉 Kotlin 层（alpha13）
+- [x] M3 bleve + gse 持久化全文索引 + PDF 文本抽取（alpha14）：正文落盘不占运行内存，升级旧快照自动重建全文
+- [x] M4 搜索语法 `type:` / `dir:` 过滤 + 全文命中相关性排序（alpha14）
+- [ ] 后续：体验打磨、F-Droid 分发、应用内删除 Android/data 文件（Shizuku）
 
 ## 致谢
 
@@ -118,7 +138,7 @@ Android 11+ 把 `/sdcard/Android/data` 对普通应用隔离，需借助特权�
   ```
 
 - 核心依赖全部为宽松许可证、零 GPL：
-  gomobile (BSD-3) · bleve (Apache-2.0) · gse (Apache-2.0) · godocx (MIT) · excelize (BSD-3)
+  gomobile (BSD-3) · bleve v2 (Apache-2.0) · gse (Apache-2.0) · ledongthuc/pdf (BSD-3) · godocx (MIT) · excelize (BSD-3)
 - 欢迎通过 Issue 与 PR 参与贡献；提交后 CI 自动完成引擎测试与全架构构建。
 
 </details>

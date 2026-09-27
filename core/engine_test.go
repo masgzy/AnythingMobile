@@ -303,27 +303,31 @@ func waitForSnapshot(t *testing.T, dataDir string) {
 	t.Fatal("快照未在限时内落盘")
 }
 
-// waitForSnapshotContent 轮询等待"包含指定路径全文"的新快照落盘。
-// 因为 saveSnapshot 是原子替换，旧快照会一直存在，
-// 单纯等文件存在无法区分新旧两次保存。
-func waitForSnapshotContent(t *testing.T, dataDir, wantPath string) {
+// waitForFTSContent 轮询等待"指定路径的全文已被 scorch 持久化"：
+// scorch 异步落盘且无公开 Flush API，用"新开引擎能搜到该正文"作为
+// 持久化完成的判定（新引擎只读，与在场的旧引擎实例共存安全）。
+func waitForFTSContent(t *testing.T, dataDir, wantPath, query string) {
 	t.Helper()
-	final := filepath.Join(dataDir, "index.snap")
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(final)
+		e, err := NewEngine(2, dataDir)
 		if err == nil {
-			if snap, decErr := decodeSnapshot(data); decErr == nil {
-				for _, c := range snap.Contents {
-					if c.Path == wantPath {
-						return
+			sr, serr := e.Search(query, 20)
+			e.Close()
+			if serr == nil {
+				var resp SearchResponse
+				if json.Unmarshal([]byte(sr), &resp) == nil {
+					for _, h := range resp.Hits {
+						if h.Path == wantPath && h.Matched == "content" {
+							return
+						}
 					}
 				}
 			}
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 	}
-	t.Fatalf("含 %s 的快照未在限时内落盘", wantPath)
+	t.Fatalf("全文 %s 未在限时内持久化可查", wantPath)
 }
 
 // decodeSnapshot 解码快照字节（v2: gzip+gob；兼容 v1: 纯 gob）。
@@ -378,6 +382,7 @@ func TestEnginePersistence(t *testing.T) {
 		t.Fatal("首次扫描超时")
 	}
 	waitForSnapshot(t, dataDir)
+	e1.Close() // scorch/bbolt 持目录锁：同目录下一个引擎打开前必须先释放
 
 	// ---- 第二次"运行"：新引擎从快照恢复 ----
 	e2, err := NewEngine(2, dataDir)
@@ -448,11 +453,12 @@ func TestEnginePersistence(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("回填后扫描超时")
 	}
-	// 屏障：scan3 的异步落盘彻底结束（必含 f1 正文），此后写入的
-	// 垃圾快照不会再被在途重命名覆盖；waitForSnapshotContent 保留
-	// 作为全文可见性的最终校验。
+	// 屏障：scan3 的异步落盘彻底结束。正文持久化由 scorch 异步完成，
+	// 用"新开引擎可搜到"轮询验证（快照 v3 不再含正文）。
+	// 轮询前先 Close e2 —— 释放目录锁后新引擎才能打开。
 	e2.saveWG.Wait()
-	waitForSnapshotContent(t, dataDir, f1)
+	e2.Close()
+	waitForFTSContent(t, dataDir, f1, "随快照持久化的正文")
 
 	e3, err := NewEngine(2, dataDir)
 	if err != nil {
@@ -462,6 +468,7 @@ func TestEnginePersistence(t *testing.T) {
 	if sr.Total != 1 || sr.Hits[0].Matched != "content" {
 		t.Fatalf("全文未随快照恢复: %+v", sr)
 	}
+	e3.Close()
 
 	// ---- 快照损坏时静默放弃，回到全量首次建索引 ----
 	if err := os.WriteFile(filepath.Join(dataDir, "index.snap"), []byte("garbage"), 0o644); err != nil {
@@ -493,6 +500,7 @@ func TestEnginePersistence(t *testing.T) {
 	e1.saveWG.Wait()
 	e2.saveWG.Wait()
 	e4.saveWG.Wait()
+	e4.Close()
 }
 
 // allocateHits 两轮配额分配的行为锁定：

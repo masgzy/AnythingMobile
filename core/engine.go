@@ -119,8 +119,9 @@ type Engine struct {
 }
 
 // NewEngine 创建引擎；workers<=0 时按 CPU 核数自动决定（上限 8）。
-// dataDir 为索引快照目录（通常传应用 filesDir 下的子目录）：
-// 构造时同步恢复已有索引，实现"打开即可搜索"；传空串则禁用持久化。
+// dataDir 为索引目录（通常传应用 filesDir 下的子目录）：名称索引快照
+// 与全文索引（bleve scorch）都存放于此，构造时同步恢复已有索引，
+// 实现"打开即可搜索"；传空串则禁用持久化（全文索引落到临时目录）。
 // Java 侧可用构造器 Engine(workers, dataDir) 或 Core.newEngine(workers, dataDir)。
 func NewEngine(workers int, dataDir string) (*Engine, error) {
 	if workers <= 0 {
@@ -136,13 +137,23 @@ func NewEngine(workers int, dataDir string) (*Engine, error) {
 		workers:  workers,
 		names:    NewNameIndex("file"),
 		dirs:     NewNameIndex("folder"),
-		content:  NewContentStore(),
 		extNames: NewNameIndex("file"),
 		extDirs:  NewNameIndex("folder"),
 		dataDir:  dataDir,
 	}
+	// 全文索引（bleve+gse，M3）：正文持久化由 scorch 负责，
+	// 快照仅保存名称/目录/外部条目。
+	e.content = NewContentStore(dataDir)
 	e.restoreSnapshot() // 秒开的关键：构造即恢复上次索引
 	return e, nil
+}
+
+// Close 释放底层资源（全文索引句柄等）。调用后引擎不可再用；
+// 进程生命周期内通常无需调用，主要供测试收尾使用。gobind: close
+func (e *Engine) Close() {
+	if e.content != nil {
+		e.content.Close()
+	}
 }
 
 // SetListener 设置进度监听器，可在任意时刻替换。gobind: setListener
@@ -191,6 +202,7 @@ func (e *Engine) beginScanCycle(mode string) {
 	if mode == "full" {
 		e.names.Reset()
 		e.dirs.Reset()
+		e.content.Reset() // 全量重建同时清空全文库（v0 漏清理已删除文档的正文残留）
 		e.firstBuild = true
 	}
 	if mode == "incremental" {
@@ -312,16 +324,25 @@ func (e *Engine) IsScanning() bool { return e.scanning.Load() }
 // 三类命中合并返回，宿主按 Kind / Matched 字段拆分到不同页签展示；
 // 除返回条目外，还通过 TotalMatches / TotalFiles / TotalDirs / TotalContent
 // 上报各类的真实命中总数（不受返回条数上限影响），供 UI 展示真实计数。
+// 支持 M4 搜索语法：type:/dir: 过滤器（见 query.go），无语法时行为不变。
 // gobind: search(String, long) String
 func (e *Engine) Search(query string, limit int64) (string, error) {
-	q := strings.TrimSpace(query)
-	if q == "" {
+	raw := strings.TrimSpace(query)
+	if raw == "" {
 		return "", errors.New("core: 查询词为空")
 	}
 	if limit <= 0 || limit > 1000 {
 		limit = 300
 	}
 	start := time.Now()
+
+	// M4 语法：剥离 type:/dir: 过滤器，剩余词作为实际查询；
+	// 剩余词为空但存在过滤器时无法"浏览式"搜索（类别快筛请用 UI 圆钮）。
+	flt := parseQuery(raw)
+	q := flt.joinedTerms()
+	if strings.TrimSpace(q) == "" {
+		return "", errors.New(`core: type:/dir: 过滤需与关键词一起使用，例如 "type:video 音乐"`)
+	}
 
 	// 各源全量取回（名称索引内部本就全量排序后再截断，这里只是去掉截断），
 	// 既用于统计真实总数，也用于按配额切片返回。
@@ -332,6 +353,18 @@ func (e *Engine) Search(query string, limit int64) (string, error) {
 	extNameAll, _ := e.extNames.searchAll(q)
 	extDirAll, _ := e.extDirs.searchAll(q)
 	e.extMu.RUnlock()
+
+	// M4：应用 type:/dir: 过滤（无过滤器时各列表原样返回）
+	if len(flt.Types) > 0 || len(flt.Dirs) > 0 {
+		nameAll = filterHits(nameAll, flt)
+		dirAll = filterHits(dirAll, flt)
+		contAll = filterHits(contAll, flt)
+		extNameAll = filterHits(extNameAll, flt)
+		extDirAll = filterHits(extDirAll, flt)
+	}
+
+	// 全文命中补全元数据（v0 为零值）：大小/修改时间来自名称索引
+	e.enrichContentHits(contAll)
 
 	// 两轮配额分配（旧逻辑“文件名占满后全文/外部被饿死”已废弃）：
 	// 第一轮各源按份额上限取（文件名 50% / 全文 25% / 目录 15% / 外部 10%），
@@ -355,6 +388,26 @@ func (e *Engine) Search(query string, limit int64) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// enrichContentHits 用名称索引补全全文命中的文件大小与修改时间
+// （v0 全文命中这两个字段为零值，详情页只能显示"未知"）。
+func (e *Engine) enrichContentHits(hits []FileHit) {
+	if len(hits) == 0 {
+		return
+	}
+	paths := make([]string, len(hits))
+	for i, h := range hits {
+		paths[i] = h.Path
+	}
+	sizes, mtimes, _ := e.names.LookupBatch(paths)
+	for i := range hits {
+		hits[i].Size = sizes[i]
+		hits[i].ModTime = mtimes[i]
+		if hits[i].Kind == "" {
+			hits[i].Kind = "file"
+		}
+	}
 }
 
 // allocateHits 两轮配额分配（算法见 Search 注释）。

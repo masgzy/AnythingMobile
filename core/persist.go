@@ -8,11 +8,16 @@ package core
 //   2. 每次扫描成功收尾后异步落盘（gob 编码 + 临时文件原子重命名）；
 //   3. "重建索引"等全量模式结束后同样覆盖旧快照。
 //
+// v3 起正文不进快照：全文库改由 bleve scorch 持久化（见 fts.go），
+// 快照只保存名称/目录/外部条目，体积从"与全文等量"降到 KB 级。
+// 旧版（v2）快照的 Contents 字段在解码时被 gob 自动忽略，
+// 正文由首次增量扫描的"名称在而全文缺失 → 补解析"机制自动重建。
+//
 // 一致性设计：
 //   - 快照保存与下一次扫描互斥（saveWG 串行化），避免读到半新半旧状态；
 //   - 加载失败（文件损坏/版本不符）静默放弃，退回全量首次建索引；
-//   - 极端情况下名称索引与全文库不一致时，增量扫描会对
-//     "名称未变但全文缺失"的文档自动补解析（见 walker.go handleFile）。
+//   - 名称索引与全文库不一致时（如 scorch 崩溃丢尾），增量扫描会对
+//     "名称未变但全文缺失"的文档自动补解析（见 walker.go）。
 
 import (
 	"bytes"
@@ -25,10 +30,10 @@ import (
 	"time"
 )
 
-// snapshotVersion v2：全文内容改用 gzip 压缩存储（文本压缩比约 4~6倍），
-// 低端机闪存上快照读写 IO 明显缩小；v1 为未压缩格式，加载时 gunzip
-// 失败即静默放弃并由全量扫描重建，无需迁移逻辑。
-const snapshotVersion = 2
+// snapshotVersion v3：正文移出快照（bleve scorch 接管，见 fts.go），
+// 快照只保留名称/目录/外部条目。加载 v2 旧快照时 Contents 字段被
+// gob 忽略，名称索引照常恢复，正文由首次扫描补解析重建。
+const snapshotVersion = 3
 
 // nameRecord 名称索引（文件/目录通用）的持久化条目。
 type nameRecord struct {
@@ -37,22 +42,17 @@ type nameRecord struct {
 	Mtime int64
 }
 
-// contentRecord 全文库的持久化条目（保存原文用于生成摘要）。
-type contentRecord struct {
-	Path string
-	Text string
-}
+// contentRecord 已废弃（v3 起正文由 bleve 持久化）。保留类型注释仅为
+// 说明历史；结构体随 Contents 字段一并移除。
 
 // snapshot 快照文件结构。
-// ExtNames/ExtDirs 为特权通道收录的外部条目（v2 后期新增）：gob 对
-// "编码端未出现的字段"填零值，旧快照缺少这两个字段时解码安全；
-// 反向（新快照 → 旧版应用）则字段被忽略，同样兼容。
+// v3：ExtNames/ExtDirs 为特权通道收录的外部条目；Contents 已移除，
+// 旧版快照（v2）解码时该字段被 gob 自动忽略。
 type snapshot struct {
 	Version  int
 	SavedAt  int64
 	Names    []nameRecord
 	Dirs     []nameRecord
-	Contents []contentRecord
 	ExtNames []nameRecord
 	ExtDirs  []nameRecord
 }
@@ -77,7 +77,6 @@ func (e *Engine) saveSnapshot() error {
 		SavedAt:  time.Now().UnixMilli(),
 		Names:    e.names.exportRecords(),
 		Dirs:     e.dirs.exportRecords(),
-		Contents: e.content.exportRecords(),
 		ExtNames: e.extNames.exportRecords(),
 		ExtDirs:  e.extDirs.exportRecords(),
 	}
@@ -105,8 +104,9 @@ func (e *Engine) saveSnapshot() error {
 }
 
 // restoreSnapshot 从磁盘恢复索引（进程内只执行一次）。
-// 首次使用（无快照）、格式不符（v1 旧快照）与加载失败均静默返回，
-// 由后续全量扫描兜底。
+// 首次使用（无快照）与加载失败均静默返回，由后续全量扫描兜底；
+// v2 旧快照可正常解码（Contents 字段被 gob 忽略），正文随首次
+// 增量扫描自动补解析。
 func (e *Engine) restoreSnapshot() {
 	if e.dataDir == "" {
 		return
@@ -124,12 +124,11 @@ func (e *Engine) restoreSnapshot() {
 		if err := gob.NewDecoder(zr).Decode(&snap); err != nil {
 			return // 损坏：放弃恢复
 		}
-		if snap.Version != snapshotVersion {
-			return // 版本不符：放弃恢复
+		if snap.Version != snapshotVersion && snap.Version != 2 {
+			return // 版本不符（v1 及更旧）：放弃恢复
 		}
 		e.names.importRecords(snap.Names)
 		e.dirs.importRecords(snap.Dirs)
-		e.content.importRecords(snap.Contents)
 		e.extNames.importRecords(snap.ExtNames)
 		e.extDirs.importRecords(snap.ExtDirs)
 	})
@@ -178,47 +177,4 @@ func (n *NameIndex) importRecords(recs []nameRecord) {
 			set[id] = struct{}{}
 		}
 	}
-}
-
-// ---- ContentStore 导出/导入 ----
-
-func (c *ContentStore) exportRecords() []contentRecord {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	out := make([]contentRecord, 0, len(c.orig))
-	for p, text := range c.orig {
-		out = append(out, contentRecord{Path: p, Text: text})
-	}
-	return out
-}
-
-func (c *ContentStore) importRecords(recs []contentRecord) {
-	if len(recs) == 0 {
-		return
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, r := range recs {
-		if r.Path == "" || strings.TrimSpace(r.Text) == "" {
-			continue
-		}
-		if _, exists := c.texts[r.Path]; exists {
-			continue
-		}
-		if c.bytes+int64(len(r.Text)) > c.maxBytes {
-			return // 容量封顶，与运行时 Add 的语义一致
-		}
-		c.texts[r.Path] = strings.ToLower(r.Text)
-		c.orig[r.Path] = r.Text
-		c.bytes += int64(len(r.Text))
-		c.order = append(c.order, r.Path)
-	}
-}
-
-// Has 返回全文库中是否已存在该路径的正文（增量扫描的补解析判据）。
-func (c *ContentStore) Has(path string) bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	_, ok := c.texts[path]
-	return ok
 }
