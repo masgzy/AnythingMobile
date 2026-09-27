@@ -22,8 +22,8 @@ android {
         applicationId = "com.masgzy.anything"
         minSdk = 24
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.0.0-alpha11"
+        versionCode = 12
+        versionName = "1.0.0-alpha12"
     }
 
     // 按 ABI 拆分产物：三种单架构 APK + 一个 universal 通吃包。
@@ -52,7 +52,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 深度收缩。大头是 material-icons-extended：仅用 39 个图标，
+            // 未开启时上万个未引用图标类原样进包（~28MB），整个 Compose 栈
+            // 无裁剪进包（10 个 dex 共 ~62MB）；开启后按实际引用裁剪。
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

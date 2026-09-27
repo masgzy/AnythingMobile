@@ -1,8 +1,9 @@
 name: Release
 
 # 推送 v* 标签时自动构建并发布 prerelease：APK 以单文件附件形式挂载（不打包 zip）。
-# alpha 阶段用 debug 签名（可直接安装体验）；工程参数与 ci.yml 保持一致
+# 使用正式签名（Secrets 证书）+ R8 收缩的 release 构建，参数与 ci.yml 保持一致
 #（Go 1.27 / Gradle wrapper 9.7.1），产物统一重命名后上传。
+# mapping.txt（R8 混淆映射）一并上传，用于还原崩溃堆栈。
 
 on:
   push:
@@ -42,21 +43,42 @@ jobs:
           chmod +x build-aar.sh
           ./build-aar.sh
 
-      - name: 构建 APK（多 ABI + universal）
+      # 自签证书由 repo Secrets 提供（与 ci.yml 同一套），保证各版本
+      # 签名一致：可直接覆盖安装升级，无需先卸载。
+      - name: 恢复签名证书（Secrets -> keystore.properties）
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          mkdir -p signing
+          echo "$KEYSTORE_BASE64" | base64 --decode > signing/anything-release.jks
+          # 用 echo 逐行生成而非 heredoc：heredoc 会继承 YAML 缩进，
+          # 前导空格会被 java.util.Properties 当作续行处理
+          {
+            echo "storeFile=signing/anything-release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > keystore.properties
+          echo "keystore.properties 已生成，证书指纹："
+          keytool -list -v -keystore signing/anything-release.jks \
+            -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" 2>/dev/null | grep SHA256 || true
+
+      - name: 生成 Gradle Wrapper 并构建 R8 收缩的签名 APK（多 ABI + universal）
         run: |
           gradle wrapper --gradle-version 9.7.1
-          ./gradlew :app:assembleDebug --no-daemon
+          ./gradlew :app:assembleRelease --no-daemon
 
-      # alpha 阶段使用 debug 签名（可直接安装体验）；
-      # 正式版将切换 assembleRelease 并配置正式签名。
-      # splits 全局生效：debug 也产出 4 个 APK（app-*-debug.apk），
+      # splits 全局生效：release 产出 4 个 APK（app-*-release.apk），
       # 需重命名为 AnythingMobile-<版本>-<abi>.apk 后再上传。
       - name: 产物清单（统一重命名为 AnythingMobile-<版本>-<abi>.apk）
         run: |
           VERSION=$(sed -n 's/.*versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -1)
-          OUT=app/build/outputs/apk/debug
+          OUT=app/build/outputs/apk/release
           mkdir -p "$OUT/renamed"
-          for f in "$OUT"/*-debug.apk; do
+          for f in "$OUT"/*-release.apk; do
             case "$f" in
               *arm64-v8a*)   ABI=arm64-v8a ;;
               *armeabi-v7a*) ABI=armeabi-v7a ;;
@@ -75,3 +97,11 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           gh release create "$TAG" --title "AnythingMobile $TAG" --generate-notes --prerelease
           gh release upload "$TAG" "$APK_DIR"/*.apk
+
+      # R8 混淆映射：崩溃堆栈还原用（retrace mapping.txt stacktrace）
+      - name: 上传 mapping.txt（R8 混淆映射）
+        if: hashFiles('app/build/outputs/mapping/release/mapping.txt') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: app/build/outputs/mapping/release/mapping.txt
