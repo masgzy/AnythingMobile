@@ -55,16 +55,19 @@ type Stats struct {
 	// Indexed 索引内现存文件条目数（与 first_build 判定同口径，含快照恢复）。
 	// 宿主在"尚未扫描"时只能用它判断是否首次使用：Files 冷启动恒为 0，
 	// 误用会导致每次启动都弹出首次建索引遮罩。
-	Indexed     int64  `json:"indexed"`
-	Added       int64  `json:"added"`        // 新增入索引的文件数
-	Updated     int64  `json:"updated"`      // 内容有变化而重新索引的文件数
-	Removed     int64  `json:"removed"`      // 已消失（被删除）而移出索引的条目数
-	DocsFound   int64  `json:"docs_found"`   // 可解析文档总数
-	DocsIndexed int64  `json:"docs_indexed"` // 已建立全文索引的文档数
-	DurationMS  int64  `json:"duration_ms"`
-	Cancelled   bool   `json:"cancelled"`
-	FirstBuild  bool   `json:"first_build"` // 本次是否为首次建索引（索引从空开始）
-	FinishedAt  string `json:"finished_at"`
+	Indexed     int64 `json:"indexed"`
+	Added       int64 `json:"added"`        // 新增入索引的文件数
+	Updated     int64 `json:"updated"`      // 内容有变化而重新索引的文件数
+	Removed     int64 `json:"removed"`      // 已消失（被删除）而移出索引的条目数
+	DocsFound   int64 `json:"docs_found"`   // 可解析文档总数
+	DocsIndexed int64 `json:"docs_indexed"` // 已建立全文索引的文档数
+	// External 特权通道（Shizuku/Stellar）收录的外部条目数（如 Android/data，
+	// 见 external.go）。这些条目不参与常规扫描与 first_build 判定。
+	External   int64  `json:"external"`
+	DurationMS int64  `json:"duration_ms"`
+	Cancelled  bool   `json:"cancelled"`
+	FirstBuild bool   `json:"first_build"` // 本次是否为首次建索引（索引从空开始）
+	FinishedAt string `json:"finished_at"`
 }
 
 // Engine 搜索引擎主对象。整个应用建议只持有一个实例。
@@ -77,6 +80,13 @@ type Engine struct {
 	names   *NameIndex // 文件名索引（kind=file）
 	dirs    *NameIndex // 目录名索引（kind=folder）
 	content *ContentStore
+
+	// 外部扩展索引（Shizuku/Stellar 特权通道收录，见 external.go）。
+	// 与常规索引隔离：增量扫描的 RemoveExcept 不触碰，查询时合并；
+	// extMu 保护"整表替换"与"查询合并"之间的跨表一致性。
+	extMu    sync.RWMutex
+	extNames *NameIndex
+	extDirs  *NameIndex
 
 	// 磁盘持久化：dataDir 为空时不启用；restoreOnce 保证只恢复一次；
 	// saveWG 用于串行化"上一次快照落盘"与"下一次扫描"。
@@ -118,11 +128,13 @@ func NewEngine(workers int, dataDir string) (*Engine, error) {
 		workers = 1
 	}
 	e := &Engine{
-		workers: workers,
-		names:   NewNameIndex("file"),
-		dirs:    NewNameIndex("folder"),
-		content: NewContentStore(),
-		dataDir: dataDir,
+		workers:  workers,
+		names:    NewNameIndex("file"),
+		dirs:     NewNameIndex("folder"),
+		content:  NewContentStore(),
+		extNames: NewNameIndex("file"),
+		extDirs:  NewNameIndex("folder"),
+		dataDir:  dataDir,
 	}
 	e.restoreSnapshot() // 秒开的关键：构造即恢复上次索引
 	return e, nil
@@ -233,6 +245,7 @@ func (e *Engine) currentStats(cancelled bool) Stats {
 		Removed:     e.removed.Load(),
 		DocsFound:   e.docsFound.Load(),
 		DocsIndexed: e.docsIndexed.Load(),
+		External:    e.externalCount(),
 		DurationMS:  time.Now().UnixMilli() - e.startAt.Load(),
 		Cancelled:   cancelled,
 		FirstBuild:  e.firstBuild,
@@ -308,6 +321,17 @@ func (e *Engine) Search(query string, limit int64) (string, error) {
 	if len(hits) < int(limit) {
 		hits = append(hits, e.content.Search(q, int(limit)-len(hits))...)
 	}
+	// 外部扩展条目（如 Android/data）垫底补位：主索引优先展示。
+	if len(hits) < int(limit) {
+		e.extMu.RLock()
+		remaining := int(limit) - len(hits)
+		ext := e.extNames.Search(q, remaining)
+		if len(ext) < remaining {
+			ext = append(ext, e.extDirs.Search(q, remaining-len(ext))...)
+		}
+		e.extMu.RUnlock()
+		hits = append(hits, ext...)
+	}
 	resp := SearchResponse{
 		Query:   q,
 		Elapsed: time.Since(start).Milliseconds(),
@@ -333,7 +357,9 @@ func (e *Engine) RemovePaths(pathsJSON string) (string, error) {
 		inNames := e.names.RemovePath(p)
 		inDirs := e.dirs.RemovePath(p)
 		inContent := e.content.Remove(p)
-		if inNames || inDirs || inContent {
+		inExt := e.extNames.RemovePath(p)
+		inExtDirs := e.extDirs.RemovePath(p)
+		if inNames || inDirs || inContent || inExt || inExtDirs {
 			removed++
 		}
 	}

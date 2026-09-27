@@ -22,8 +22,8 @@ android {
         applicationId = "com.masgzy.anything"
         minSdk = 24
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.0.0-alpha8"
+        versionCode = 9
+        versionName = "1.0.0-alpha9"
     }
 
     // 按 ABI 拆分产物：三种单架构 APK + 一个 universal 通吃包。
@@ -110,4 +110,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.core:core-ktx:1.19.0")
+
+    // Shizuku / Stellar 特权通道：官方 API + Provider（扫描 Android/data 用）。
+    // Stellar 是 Shizuku 的深度定制分支且内置 Shizuku 兼容层，
+    // 接入官方 API 一套即可同时被 Shizuku 与 Stellar 管理器支持。
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 }

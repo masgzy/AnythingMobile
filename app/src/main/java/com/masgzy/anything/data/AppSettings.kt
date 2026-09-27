@@ -23,6 +23,8 @@ import com.masgzy.anything.ui.theme.PaletteStyle
  *   - AMOLED 纯黑：深色模式下将 surface 置为纯黑，省电护眼。
  * 功能设置：
  *   - 进入应用时自动更新索引（增量，有变动才重解析）；
+ *   - 扫描 Android/data 目录：借助 Shizuku/Stellar 特权通道收录应用数据
+ *     目录的文件名（Android 11+ 对普通应用隔离，需用户另行授权）；
  *   - 筛选文字显示时长：点「所有」展开类别钮后，文字标签自动显示的时长
  *     （5 秒后消失，点击重新显示；可选不显示/3/5/10 秒/常驻）；
  *   - 结果排序：按名称 / 按时间（对应原版 FileSortSettings.NAME/TIME）；
@@ -42,6 +44,8 @@ data class AppSettings(
     val invertColors: Boolean = false,
     val amoled: Boolean = false,
     val autoScanOnEnter: Boolean = true,
+    /** 扫描 Android/data 目录（需 Shizuku/Stellar 特权，仅收录名称不含全文）。 */
+    val scanAndroidData: Boolean = false,
     /** 筛选钮文字标签显示时长（秒）：0=不自动显示，-1=常驻，>0=自动隐藏秒数。 */
     val filterLabelSeconds: Int = 5,
     val sortByName: Boolean = true,
@@ -100,6 +104,7 @@ class SettingsRepository(context: Context) {
         invertColors = prefs.getBoolean(KEY_INVERT, false),
         amoled = prefs.getBoolean(KEY_AMOLED, false),
         autoScanOnEnter = prefs.getBoolean(KEY_AUTO_SCAN, true),
+        scanAndroidData = prefs.getBoolean(KEY_SCAN_ANDROID_DATA, false),
         filterLabelSeconds = prefs.getInt(KEY_FILTER_LABEL_SECONDS, 5),
         sortByName = prefs.getBoolean(KEY_SORT_NAME, true),
         welcomeSeen = prefs.getBoolean(KEY_WELCOME_SEEN, false),
@@ -130,6 +135,8 @@ class SettingsRepository(context: Context) {
 
     fun setAutoScanOnEnter(v: Boolean) = put(KEY_AUTO_SCAN, v)
 
+    fun setScanAndroidData(v: Boolean) = put(KEY_SCAN_ANDROID_DATA, v)
+
     fun setFilterLabelSeconds(v: Int) = put(KEY_FILTER_LABEL_SECONDS, v)
 
     fun setSortByName(v: Boolean) = put(KEY_SORT_NAME, v)
@@ -156,6 +163,7 @@ class SettingsRepository(context: Context) {
         private const val KEY_INVERT = "invert_colors"
         private const val KEY_AMOLED = "amoled"
         private const val KEY_AUTO_SCAN = "auto_scan_on_enter"
+        private const val KEY_SCAN_ANDROID_DATA = "scan_android_data"
         private const val KEY_FILTER_LABEL_SECONDS = "filter_label_seconds"
         private const val KEY_SORT_NAME = "sort_by_name"
         private const val KEY_WELCOME_SEEN = "welcome_seen"

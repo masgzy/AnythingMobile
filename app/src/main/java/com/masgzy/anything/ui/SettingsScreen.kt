@@ -36,8 +36,10 @@ import androidx.compose.material.icons.rounded.Colorize
 import androidx.compose.material.icons.rounded.Contrast
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.FolderSpecial
 import androidx.compose.material.icons.rounded.InvertColors
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Label
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.RestartAlt
@@ -83,6 +85,7 @@ import com.masgzy.anything.BuildConfig
 import com.masgzy.anything.data.PalettePreset
 import com.masgzy.anything.data.RoleColors
 import com.masgzy.anything.data.ScanPhase
+import com.masgzy.anything.data.ShizukuAccess
 import com.masgzy.anything.data.ThemeMode
 import com.masgzy.anything.ui.theme.ColorTupleDefaults
 import com.masgzy.anything.ui.theme.PaletteStyle
@@ -107,6 +110,8 @@ fun SettingsScreen(
     val repoState by viewModel.repo.state.collectAsStateWithLifecycle()
     val scanning = repoState.phase != ScanPhase.IDLE
     val monetAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val shizukuState by viewModel.shizukuState.collectAsStateWithLifecycle()
+    val externalCount by viewModel.externalCount.collectAsStateWithLifecycle()
 
     var showThemeModeDialog by remember { mutableStateOf(false) }
     var showPaletteSheet by remember { mutableStateOf(false) }
@@ -240,6 +245,41 @@ fun SettingsScreen(
                 else "清空后重新扫描全部文件，耗时较长",
                 enabled = !scanning && repoState.ready,
                 onClick = { viewModel.startScan(incremental = false) },
+            )
+
+            // ---- 扩展扫描（Shizuku / Stellar） ----
+            SectionHeader("扩展扫描")
+
+            PreferenceCard(
+                icon = Icons.Rounded.FolderSpecial,
+                title = "扫描 Android/data 目录",
+                subtitle = "借助 Shizuku / Stellar 特权收录应用数据目录的文件名" +
+                    "（不含全文内容；Android/data 在 Android 11+ 对普通应用隔离）",
+                trailing = {
+                    Switch(
+                        checked = settings.scanAndroidData,
+                        onCheckedChange = { viewModel.setAndroidDataEnabled(it) },
+                    )
+                },
+            )
+
+            PreferenceCard(
+                icon = Icons.Rounded.Key,
+                title = "Shizuku / Stellar 授权",
+                subtitle = when (shizukuState.status) {
+                    ShizukuAccess.Status.NOT_RUNNING ->
+                        "未检测到服务 —— 请先安装并启动 Shizuku 或 Stellar，点击前往下载"
+                    ShizukuAccess.Status.NEED_PERMISSION ->
+                        "服务已就绪 · 点击发起授权请求"
+                    ShizukuAccess.Status.GRANTED ->
+                        "已授权 · 已收录 $externalCount 项 Android/data 条目"
+                },
+                onClick = {
+                    when (shizukuState.status) {
+                        ShizukuAccess.Status.NOT_RUNNING -> viewModel.openShizukuDownload()
+                        else -> viewModel.requestShizukuPermission()
+                    }
+                },
             )
 
             // ---- 结果 ----

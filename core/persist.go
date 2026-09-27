@@ -44,12 +44,17 @@ type contentRecord struct {
 }
 
 // snapshot 快照文件结构。
+// ExtNames/ExtDirs 为特权通道收录的外部条目（v2 后期新增）：gob 对
+// "编码端未出现的字段"填零值，旧快照缺少这两个字段时解码安全；
+// 反向（新快照 → 旧版应用）则字段被忽略，同样兼容。
 type snapshot struct {
 	Version  int
 	SavedAt  int64
 	Names    []nameRecord
 	Dirs     []nameRecord
 	Contents []contentRecord
+	ExtNames []nameRecord
+	ExtDirs  []nameRecord
 }
 
 // snapshotPath 快照文件最终路径；临时文件为其加 .tmp 后缀。
@@ -73,6 +78,8 @@ func (e *Engine) saveSnapshot() error {
 		Names:    e.names.exportRecords(),
 		Dirs:     e.dirs.exportRecords(),
 		Contents: e.content.exportRecords(),
+		ExtNames: e.extNames.exportRecords(),
+		ExtDirs:  e.extDirs.exportRecords(),
 	}
 
 	var buf bytes.Buffer
@@ -117,6 +124,8 @@ func (e *Engine) restoreSnapshot() {
 		e.names.importRecords(snap.Names)
 		e.dirs.importRecords(snap.Dirs)
 		e.content.importRecords(snap.Contents)
+		e.extNames.importRecords(snap.ExtNames)
+		e.extDirs.importRecords(snap.ExtDirs)
 	})
 }
 

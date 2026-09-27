@@ -2,11 +2,14 @@ package com.masgzy.anything.data
 
 import android.content.Context
 import android.content.Intent
+import android.os.Environment
 import androidx.core.content.FileProvider
 import com.masgzy.anything.core.Engine
 import com.masgzy.anything.core.ProgressListener
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -192,6 +195,34 @@ class EngineRepository(context: Context) {
         _state.value = _state.value.copy(statusText = "已请求取消…")
     }
 
+    /** 直写状态栏文案（特权通道枚举等引擎外流程的进度提示）。 */
+    fun setStatusText(text: String) {
+        _state.value = _state.value.copy(statusText = text)
+    }
+
+    // ---- 扩展索引（Shizuku/Stellar 特权通道收录的 Android/data 等） ----
+
+    /**
+     * 用宿主枚举的完整清单替换扩展索引；引擎扫描中时返回 false（
+     * 调用方应等 onFinished 后重试）。
+     */
+    fun replaceExternalEntries(root: String, dirs: List<String>, files: List<String>): Boolean {
+        val eng = engine ?: return false
+        val json = JSONObject().apply {
+            put("root", root)
+            put("dirs", JSONArray(dirs))
+            put("files", JSONArray(files))
+        }.toString()
+        return runCatching { eng.replaceExternalEntries(json) }
+            .onFailure { android.util.Log.w("AnythingEngine", "扩展索引更新失败", it) }
+            .isSuccess
+    }
+
+    /** 扩展条目总数（文件+目录），供设置页展示。 */
+    fun externalCount(): Int = runCatching {
+        JSONObject(engine?.stats() ?: "{}").optInt("external", 0)
+    }.getOrDefault(0)
+
     /** 搜索三类命中（文件名/目录名/全文），合并返回。 */
     fun search(query: String) {
         val eng = engine
@@ -239,33 +270,60 @@ class EngineRepository(context: Context) {
         return runCatching { JSONObject(resp).optInt("removed", 0) }.getOrDefault(0)
     }
 
-    /** 用系统查看器打开命中的文件。 */
-    fun openFile(path: String): Boolean = runCatching {
-        val file = File(path)
-        if (!file.exists()) return false
-        val uri = fileUri(file)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, mimeOf(path))
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        appContext.startActivity(intent)
-        true
-    }.getOrDefault(false)
+    /**
+     * 用系统查看器打开命中的文件。
+     * Android/data 等特权路径对应用进程不可读：先经 Shizuku/Stellar
+     * 导出为缓存副本再打开（未授权或导出失败返回 false 由 UI 提示）。
+     */
+    suspend fun openFile(path: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            var file = File(path)
+            if (!file.exists()) {
+                if (!isPrivilegedPath(path)) return@runCatching false
+                file = exportPrivileged(path) ?: return@runCatching false
+            }
+            val uri = fileUri(file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mimeOf(path))
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            appContext.startActivity(intent)
+            true
+        }.getOrDefault(false)
+    }
 
-    /** 分享文件（详情页"发送"）。 */
-    fun shareFile(path: String): Boolean = runCatching {
-        val file = File(path)
-        if (!file.exists()) return false
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = mimeOf(path)
-            putExtra(Intent.EXTRA_STREAM, fileUri(file))
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        appContext.startActivity(Intent.createChooser(intent, "发送").apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        })
-        true
-    }.getOrDefault(false)
+    /** 分享文件（详情页"发送"）；特权路径先导出缓存副本。 */
+    suspend fun shareFile(path: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            var file = File(path)
+            if (!file.exists()) {
+                if (!isPrivilegedPath(path)) return@runCatching false
+                file = exportPrivileged(path) ?: return@runCatching false
+            }
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = mimeOf(path)
+                putExtra(Intent.EXTRA_STREAM, fileUri(file))
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            appContext.startActivity(Intent.createChooser(intent, "发送").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+            true
+        }.getOrDefault(false)
+    }
+
+    /** 特权路径：Android 11+ 对应用隔离的目录（数据目录/OBB）。 */
+    private fun isPrivilegedPath(path: String): Boolean {
+        val base = Environment.getExternalStorageDirectory()?.absolutePath ?: return false
+        return path.startsWith("$base/Android/data/") || path.startsWith("$base/Android/obb/")
+    }
+
+    /** 经 Shizuku/Stellar 把特权路径导出为缓存副本；失败返回 null。 */
+    private suspend fun exportPrivileged(path: String): File? {
+        if (!ShizukuAccess.ready) return null
+        val dir = File(appContext.cacheDir, "shizuku_export/${path.hashCode()}")
+        return ShizukuAccess.exportFile(path, File(dir, File(path).name))
+    }
 
     private fun fileUri(file: File) = FileProvider.getUriForFile(
         appContext, "${appContext.packageName}.fileprovider", file
