@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Environment
 import androidx.core.content.FileProvider
 import com.masgzy.anything.core.Engine
+import com.masgzy.anything.data.office.LegacyOfficeParser
 import com.masgzy.anything.core.ProgressListener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -170,7 +171,7 @@ class EngineRepository(context: Context) {
             eng?.setListener(listener)
             // 旧版 Office（.doc/.xls/.ppt/.wps）宿主侧解析兜底；
             // 失败不影响引擎本身（解析器内部自捕获异常返回空串）
-            eng?.runCatching { setExternalParser(office.LegacyOfficeParser()) }
+            eng?.runCatching { setExternalParser(LegacyOfficeParser()) }
                 ?.onFailure { android.util.Log.e("AnythingEngine", "注册旧版 Office 解析器失败", it) }
             _state.value = _state.value.copy(
                 ready = eng != null,
