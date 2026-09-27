@@ -80,6 +80,8 @@ android {
         compose = true
         // 生成 BuildConfig：设置页版本号用 BuildConfig.VERSION_NAME，不再硬编码
         buildConfig = true
+        // AIDL：Shizuku/Stellar 用户服务接口（AGP 8+ 默认关闭，需显式开启）
+        aidl = true
     }
 }
 
