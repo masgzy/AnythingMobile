@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 // ErrContentFull 内容库容量已满，不再接收新文档。
@@ -31,7 +32,11 @@ func NewContentStore() *ContentStore {
 }
 
 // Add 写入/更新一个文档的全文。
+// 入库前统一清洗（normalizeForStore）：剔除无效 UTF-8、控制字符、
+// 符号字体 PUA 字符等 UI 无法渲染的成分，从源头避免搜索结果出现
+// "菱形问号"。宿主 ExternalParser 与内置 OOXML 解析共用同一入口。
 func (c *ContentStore) Add(path, text string) error {
+	text = normalizeForStore(text)
 	if strings.TrimSpace(text) == "" {
 		return errors.New("core: 文档正文为空")
 	}
@@ -135,26 +140,46 @@ func (c *ContentStore) searchAll(q string) ([]FileHit, int) {
 			continue
 		}
 		orig := c.orig[p]
+		src := orig
+		if len(lower) != len(orig) {
+			// 大小写转换改变字节长度的罕见情形（如土耳其 İ）：
+			// lower 的字节偏移映射不到 orig，退化为对小写文本取摘要
+			src = lower
+		}
 		hits = append(hits, FileHit{
 			Path:    p,
 			Name:    baseName(p),
-			Snippet: snippet(orig, idx, len(ql)),
+			Snippet: snippet(src, idx, len(ql)),
 			Matched: "content",
 		})
 	}
 	return hits, len(hits)
 }
 
-// snippet 生成命中位置前后的摘要（前后各取 40 字符）。
+// snippet 生成命中位置前后的摘要（前后各取约 40 字节）。
+// 切片必须对齐 UTF-8 字符边界：start 回退到 rune 起点、end 前扩到
+// rune 边界，否则半个多字节序列在 UI 上渲染为 U+FFFD（菱形）。
 func snippet(text string, idx, qLen int) string {
 	const ctx = 40
+	if idx < 0 || idx > len(text) || idx+qLen > len(text) {
+		// 偏移异常（不应发生）：退化为开头截取，保证不越界
+		idx, qLen = 0, 0
+	}
 	start := idx - ctx
 	if start < 0 {
 		start = 0
+	} else {
+		for start < idx && !utf8.RuneStart(text[start]) {
+			start++
+		}
 	}
 	end := idx + qLen + ctx
 	if end > len(text) {
 		end = len(text)
+	} else {
+		for end < len(text) && !utf8.RuneStart(text[end]) {
+			end++
+		}
 	}
 	s := text[start:end]
 	s = strings.ReplaceAll(s, "\n", " ")

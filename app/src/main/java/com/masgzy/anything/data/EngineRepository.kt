@@ -168,6 +168,10 @@ class EngineRepository(context: Context) {
             }.getOrNull()
             engine = eng
             eng?.setListener(listener)
+            // 旧版 Office（.doc/.xls/.ppt/.wps）宿主侧解析兜底；
+            // 失败不影响引擎本身（解析器内部自捕获异常返回空串）
+            eng?.runCatching { setExternalParser(office.LegacyOfficeParser()) }
+                ?.onFailure { android.util.Log.e("AnythingEngine", "注册旧版 Office 解析器失败", it) }
             _state.value = _state.value.copy(
                 ready = eng != null,
                 initError = if (eng == null) {
