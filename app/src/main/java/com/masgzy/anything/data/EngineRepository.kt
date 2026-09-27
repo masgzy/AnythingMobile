@@ -42,7 +42,7 @@ private data class SearchResult(
  * 返回条数只影响列表可见范围；真实命中数由引擎 total_* 字段上报，
  * 页签计数与列表截断提示都以真实总数为准。
  */
-private const val SEARCH_LIMIT = 1000
+private const val SEARCH_LIMIT = 1000L
 
 /** 索引/扫描阶段。 */
 enum class ScanPhase { IDLE, FIRST_BUILD, UPDATING }
