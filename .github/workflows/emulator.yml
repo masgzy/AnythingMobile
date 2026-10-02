@@ -81,20 +81,35 @@ jobs:
 
       # ---------- Android 虚拟机 ----------
 
-      - name: KVM 硬件加速检查（GitHub 托管 runner 自带嵌套虚拟化）
+      # 2026 年 runner 镜像不再预装 emulator 组件（首跑实证：
+      # $ANDROID_HOME/emulator/emulator 不存在导致 exit 127），
+      # 需与系统镜像一起现装；cmdline-tools 的目录号不定，
+      # 兼容 latest 与版本号目录两种布局。
+      - name: 安装 emulator 组件与系统镜像
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKM" ] || SDKM=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)
+          echo "sdkmanager: $SDKM"
+          yes | "$SDKM" --licenses > /dev/null 2>&1 || true
+          "$SDKM" "emulator" "$SYS_IMAGE" > /dev/null
+          echo "emulator 与系统镜像安装完成"
+
+      # GitHub 托管 runner 自带嵌套虚拟化：/dev/kvm（root:kvm 组）。
+      # chmod 666 兜底组权限边缘情况；-accel check 验证 KVM 真实可用。
+      - name: KVM 硬件加速检查
         run: |
           ls -l /dev/kvm
+          sudo chmod 666 /dev/kvm || true
           "$ANDROID_HOME/emulator/emulator" -accel check
 
-      - name: 安装系统镜像并创建 AVD
+      - name: 创建 AVD
         run: |
-          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "$SYS_IMAGE" > /dev/null
+          AVDM="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
+          [ -x "$AVDM" ] || AVDM=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/avdmanager | head -1)
           # echo "no"：跳过自定义硬件配置向导交互
-          echo "no" | avdmanager create avd -n "$AVD_NAME" -k "$SYS_IMAGE"
+          echo "no" | "$AVDM" create avd -n "$AVD_NAME" -k "$SYS_IMAGE"
           echo "AVD 创建完成："
-          avdmanager list avd | grep -A2 "Name: $AVD_NAME" || true
+          "$AVDM" list avd | grep -A2 "Name: $AVD_NAME" || true
 
       # 后台进程在同 job 的后续 step 中存活；日志落 /tmp 备排障
       - name: 启动模拟器并等待开机完成
@@ -161,7 +176,9 @@ jobs:
         if: failure()
         run: |
           export PATH="$ANDROID_HOME/platform-tools:$PATH"
-          adb logcat -d > anything-logcat.txt || true
+          # 新版 adb logcat 在无设备时会挂起等设备（首跑实证：
+          # "- waiting for device -" 吊死 10 分钟直到手动取消），必须上 timeout
+          timeout 30 adb logcat -d > anything-logcat.txt || true
           cp /tmp/emulator.log . || true
           cp /tmp/am-start.txt . || true
           exit 0
