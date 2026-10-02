@@ -1,0 +1,177 @@
+name: Android Emulator
+
+# 真实 Android 虚拟机上的回归网：JVM 单测（ci.yml）碰不到 JNI 加载、
+# 系统服务与真实生命周期，这一层只能靠模拟器补齐。
+#
+# 流程：构建引擎 AAR -> debug APK -> GitHub 托管 runner（自带 KVM 嵌套
+# 虚拟化）启动 API 31 x86_64 模拟器 -> 授权存储 -> 启动冒烟（进程存活
+# + logcat 无崩溃指纹 + 截图）-> connectedDebugAndroidTest。
+#
+# 触发策略：仅当代码/构建脚本/workflow 本身变动才跑（改 README 不浪费
+# 15 分钟模拟机时）；随时可 workflow_dispatch 手动点跑。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "core/**"
+      - "build-aar.sh"
+      - "gradle/wrapper/**"
+      - "*.gradle.kts"
+      - ".github/workflows/emulator.yml"
+  pull_request:
+  workflow_dispatch:
+
+# 与 ci.yml 的 ci- 前缀分开：两个 workflow 并行互不取消
+concurrency:
+  group: emulator-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # API 31 (Android 12) x86_64：minSdk 24 之上，启动速度与稳定性均衡；
+  # MANAGE_EXTERNAL_STORAGE 的 appops 授权在该版本可用。
+  # 未来需要多版本矩阵时，把这两个值换成 matrix 变量即可。
+  SYS_IMAGE: system-images;android-31;google_apis;x86_64
+  AVD_NAME: anything-ci
+  PKG: com.masgzy.anything
+
+jobs:
+  emulator-smoke:
+    name: 模拟器冒烟 + 仪器化测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      # 与 ci.yml 同款官方 action（均为 Node.js 24 原生运行时版本）
+      - uses: actions/checkout@v7
+
+      - name: 安装 Go 1.27
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.27'
+          # go.mod 在 core/ 子目录，不指定则模块缓存探测落空
+          cache-dependency-path: core/go.sum
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # 与 ci.yml 相同 key：两个 workflow 共享同一份 Gradle 缓存
+      - name: Gradle 依赖缓存
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: 构建 Go 引擎 AAR（含 16KB 页对齐）
+        run: |
+          chmod +x build-aar.sh
+          ./build-aar.sh
+
+      # debug 变体：R8 关闭、自动 debug 签名，不需要任何 Secrets
+      - name: 构建 debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      # ---------- Android 虚拟机 ----------
+
+      - name: KVM 硬件加速检查（GitHub 托管 runner 自带嵌套虚拟化）
+        run: |
+          ls -l /dev/kvm
+          "$ANDROID_HOME/emulator/emulator" -accel check
+
+      - name: 安装系统镜像并创建 AVD
+        run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "$SYS_IMAGE" > /dev/null
+          # echo "no"：跳过自定义硬件配置向导交互
+          echo "no" | avdmanager create avd -n "$AVD_NAME" -k "$SYS_IMAGE"
+          echo "AVD 创建完成："
+          avdmanager list avd | grep -A2 "Name: $AVD_NAME" || true
+
+      # 后台进程在同 job 的后续 step 中存活；日志落 /tmp 备排障
+      - name: 启动模拟器并等待开机完成
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+          emulator -avd "$AVD_NAME" \
+            -no-window -no-audio -no-boot-anim -no-snapshot \
+            -gpu swiftshader_indirect -accel on \
+            > /tmp/emulator.log 2>&1 &
+          EMU_PID=$!
+          echo "模拟器后台启动中（PID $EMU_PID），日志 /tmp/emulator.log"
+          # 冷启动最长等 7 分钟：wait-for-device 到位后再轮询 sys.boot_completed
+          timeout 420 bash -c '
+            adb wait-for-device
+            until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do
+              sleep 3
+            done
+          '
+          echo "开机完成：Android $(adb shell getprop ro.build.version.release | tr -d '\r')"
+
+      # 首启会进欢迎页引导授权，提前授掉，冒烟直达主界面
+      - name: 预授权存储权限
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          adb shell pm grant "$PKG" android.permission.READ_EXTERNAL_STORAGE || true
+          # Android 11+ 全盘访问走 appops（部分版本需要 --uid 形式，两条都发）
+          adb shell appops set "$PKG" MANAGE_EXTERNAL_STORAGE allow || true
+          adb shell appops set --uid "$PKG" MANAGE_EXTERNAL_STORAGE allow || true
+
+      - name: 冒烟：安装 APK 并启动主界面
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          APK=$(ls app/build/outputs/apk/debug/*x86_64*.apk | head -1)
+          echo "安装 $APK"
+          adb install -r -t "$APK"
+          adb logcat -c
+          adb shell am start -W -n "$PKG/.MainActivity" | tee /tmp/am-start.txt
+          grep -q "Status: ok" /tmp/am-start.txt || { echo "am start 启动失败"; exit 1; }
+          # 等 Compose 首帧 + 引擎初始化
+          sleep 10
+          PID=$(adb shell pidof "$PKG" | tr -d '\r')
+          [ -n "$PID" ] || { echo "进程 10 秒内消失 —— 启动即崩"; exit 1; }
+          echo "主进程存活：PID $PID"
+          # 崩溃指纹：AndroidRuntime 块里的 Process 行必然带包名
+          if adb logcat -d | grep -q "E AndroidRuntime.*$PKG"; then
+            echo "logcat 检出本应用 FATAL EXCEPTION"; exit 1
+          fi
+          adb exec-out screencap -p > anything-emulator-home.png
+          ls -lh anything-emulator-home.png
+
+      # ActivityScenario 启动链路回归（app/src/androidTest/AppLaunchTest.kt）
+      - name: 仪器化测试（connectedDebugAndroidTest）
+        run: ./gradlew :app:connectedDebugAndroidTest --no-daemon
+
+      # ---------- 产物 ----------
+
+      - name: 上传模拟器截图（直传）
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: anything-emulator-home.png
+
+      - name: 失败时收集现场
+        if: failure()
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          adb logcat -d > anything-logcat.txt || true
+          cp /tmp/emulator.log . || true
+          cp /tmp/am-start.txt . || true
+          exit 0
+
+      - name: 上传失败现场（logcat + 模拟器日志 + 测试报告）
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          path: |
+            anything-logcat.txt
+            emulator.log
+            am-start.txt
+            app/build/outputs/androidTest-results/

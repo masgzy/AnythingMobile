@@ -24,6 +24,8 @@ android {
         targetSdk = 36
         versionCode = 16
         versionName = "1.0.0-alpha16"
+        // 仪器化测试跑在 Android 虚拟机上（.github/workflows/emulator.yml）
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     // 按 ABI 拆分产物：三种单架构 APK + 一个 universal 通吃包。
@@ -102,6 +104,13 @@ dependencies {
 
     // JVM 单测：LegacyOfficeParser / CfbReader 二进制解析回归网（P0-1）
     testImplementation("junit:junit:4.13.2")
+
+    // 仪器化测试（emulator.yml 在模拟器上跑 connectedDebugAndroidTest）：
+    // ActivityScenario 启动链路冒烟 —— 覆盖 JNI 加载、ViewModel 构造、
+    // 崩溃监听安装，这三样 JVM 单测永远碰不到
+    androidTestImplementation("androidx.test:core-ktx:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
 
     // Compose（BOM 2026.08.00：ui/foundation 1.12.0、material3 1.4.0、icons 1.7.8）
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
