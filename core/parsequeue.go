@@ -96,8 +96,26 @@ func (p *parsePool) run(workers int) {
 	wg.Wait()
 }
 
-// worker 单个解析协程：拾取任务 → 解析入全文库，直到队列排空或被取消。
+// worker 单个解析协程：拾取任务 → 抽取正文（攒批）→ 批量入全文库，
+// 直到队列排空或被取消。
+//
+// 攒批（alpha16）：worker 本地攒满 32 条或队列暂时排空时一次性
+// AddBatch —— bleve 每次提交都产生 scorch 段生成/合并，逐文档提交
+// 在数千文档的全量建索引下开销被放大；抽取仍是逐文档，只有入库
+// 被批量化。取消/收尾路径同样 flush，保证已抽取正文不丢。
 func (p *parsePool) worker() {
+	const flushAt = 32
+	buf := make([]DocText, 0, flushAt)
+	flush := func() {
+		if len(buf) == 0 {
+			return
+		}
+		if n := p.e.content.AddBatch(buf); n > 0 {
+			total := p.e.docsIndexed.Add(int64(n))
+			p.e.notifyProgress("index", total)
+		}
+		buf = buf[:0]
+	}
 	for {
 		p.mu.Lock()
 		for len(p.queue) == 0 && p.pending > 0 && !p.stopped {
@@ -105,6 +123,7 @@ func (p *parsePool) worker() {
 		}
 		if len(p.queue) == 0 || p.stopped {
 			p.mu.Unlock()
+			flush()
 			return
 		}
 		task := p.queue[0]
@@ -113,6 +132,7 @@ func (p *parsePool) worker() {
 
 		if p.e.cancel.Load() {
 			p.stop()
+			flush()
 			return
 		}
 
@@ -131,7 +151,20 @@ func (p *parsePool) worker() {
 				}
 				p.mu.Unlock()
 			}()
-			p.e.parseAndStore(task.path, task.ext)
+			if text, ok := p.e.extractDoc(task.path, task.ext); ok {
+				buf = append(buf, DocText{Path: task.path, Text: text})
+			}
 		}()
+		if len(buf) >= flushAt {
+			flush()
+		} else {
+			// 队列暂时排空时顺手 flush：大文档在队尾堆积时降低不可见窗口
+			p.mu.Lock()
+			empty := len(p.queue) == 0
+			p.mu.Unlock()
+			if empty {
+				flush()
+			}
+		}
 	}
 }

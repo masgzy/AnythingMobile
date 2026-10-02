@@ -68,7 +68,7 @@ func TestPDFEndToEnd(t *testing.T) {
 	if err := cs.Add(p, text); err != nil {
 		t.Fatal(err)
 	}
-	hits, _ := cs.searchAll("合作协议")
+	hits, _ := cs.searchAll("合作协议", 0)
 	if len(hits) != 1 {
 		t.Fatalf("PDF 正文应可搜: %v", hits)
 	}

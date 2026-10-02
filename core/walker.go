@@ -353,10 +353,10 @@ func (e *Engine) processFileBatch(paths []string, infos []fs.FileInfo, increment
 	}
 }
 
-// parseAndStore 按扩展名选择解析通道（内置 OOXML / 宿主兜底 / 暂不支持），
-// 成功抽取的正文写入全文库。alpha11 起由解析流水线 worker 调用，
-// 不再在遍历协程上执行。
-func (e *Engine) parseAndStore(path, ext string) {
+// extractDoc 按扩展名选择解析通道（内置 OOXML / 宿主兜底 / 暂不支持），
+// 成功返回抽取的正文；失败或空正文返回 false。
+// alpha16 自 parseAndStore 拆出：解析流水线 worker 需要先攒批再入库。
+func (e *Engine) extractDoc(path, ext string) (string, bool) {
 	var (
 		text string
 		err  error
@@ -367,11 +367,23 @@ func (e *Engine) parseAndStore(path, ext string) {
 	case legacyDocExts[ext]:
 		if p, ok := e.extParser.Load().(ExternalParser); ok && p != nil {
 			text, err = e.parseExternal(path)
+		} else {
+			return "", false
 		}
 	default:
-		return
+		return "", false
 	}
 	if err != nil || strings.TrimSpace(text) == "" {
+		return "", false
+	}
+	return text, true
+}
+
+// parseAndStore 抽取正文并写入全文库（单文档路径，进度逐条上报）。
+// 解析流水线已改为攒批（AddBatch），此函数保留供单文档调用方与测试使用。
+func (e *Engine) parseAndStore(path, ext string) {
+	text, ok := e.extractDoc(path, ext)
+	if !ok {
 		return
 	}
 	if e.content.Add(path, text) == nil {

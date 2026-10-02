@@ -49,6 +49,7 @@ func (e *Engine) ReplaceExternalEntries(feedJSON string) error {
 	e.extMu.Lock()
 	e.extNames.Reset()
 	e.extDirs.Reset()
+	e.invalidateSearchCache()
 	for _, p := range feed.Dirs {
 		if validExternalPath(p, feed.Root) {
 			e.extDirs.Add(p, 0, 0)

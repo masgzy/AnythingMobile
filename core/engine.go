@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -115,6 +116,12 @@ type Engine struct {
 	// 遍历协程启动之前（happens-before），期间只读访问。
 	pp *parsePool
 
+	// 搜索结果缓存（alpha16）：防抖重复输入与删除后刷新场景下，
+	// 同一查询短时间内重复计算。TTL 兜底失效（扫描中索引持续变化，
+	// 最多陈旧 TTL 时长），容量上限防内存膨胀。
+	searchMu    sync.Mutex
+	searchCache map[string]searchCacheEntry
+
 	firstBuild bool // 本次扫描开始时索引是否为空
 }
 
@@ -197,6 +204,7 @@ func parseScanOptions(optionsJSON string) (ScanOptions, error) {
 func (e *Engine) beginScanCycle(mode string) {
 	e.cancel.Store(false)
 	e.startAt.Store(time.Now().UnixMilli())
+	e.invalidateSearchCache() // 索引即将变化，缓存立即失效（扫描中不再缓存新结果以外的一致性由 TTL 兜底）
 
 	e.firstBuild = e.names.Count() == 0
 	if mode == "full" {
@@ -237,6 +245,7 @@ func (e *Engine) finishScan(mode string, cancelled bool) {
 		e.seenMu.Unlock()
 	}
 	e.scanning.Store(false)
+	e.invalidateSearchCache() // 收尾清理/计数复位后，旧结果一律失效
 	// 先注册并启动异步落盘，再通知完成事件：
 	// 保证宿主看到 OnFinished 时 saveWG 计数已包含本次落盘，
 	// 测试/上层等待 saveWG 即可无竞态地确认写盘协程全部退出。
@@ -334,6 +343,13 @@ func (e *Engine) Search(query string, limit int64) (string, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 300
 	}
+
+	// 结果缓存：键含原始查询（含 type:/dir: 过滤器）与 limit。
+	key := raw + "\x00" + strconv.FormatInt(limit, 10)
+	if b, ok := e.cachedSearch(key); ok {
+		return string(b), nil
+	}
+
 	start := time.Now()
 
 	// M4 语法：剥离 type:/dir: 过滤器，剩余词作为实际查询；
@@ -346,9 +362,15 @@ func (e *Engine) Search(query string, limit int64) (string, error) {
 
 	// 各源全量取回（名称索引内部本就全量排序后再截断，这里只是去掉截断），
 	// 既用于统计真实总数，也用于按配额切片返回。
+	// 全文源的验证预算：无过滤器时 limit 足够（配额分配后全文最多贡献
+	// limit 条）；带 type:/dir: 过滤时命中会在过滤后被削，预算加倍补偿。
 	nameAll, _ := e.names.searchAll(q)
 	dirAll, _ := e.dirs.searchAll(q)
-	contAll, _ := e.content.searchAll(q)
+	contCap := int(limit)
+	if len(flt.Types) > 0 || len(flt.Dirs) > 0 {
+		contCap *= 2
+	}
+	contAll, contTotal := e.content.searchAll(q, contCap)
 	e.extMu.RLock()
 	extNameAll, _ := e.extNames.searchAll(q)
 	extDirAll, _ := e.extDirs.searchAll(q)
@@ -359,6 +381,8 @@ func (e *Engine) Search(query string, limit int64) (string, error) {
 		nameAll = filterHits(nameAll, flt)
 		dirAll = filterHits(dirAll, flt)
 		contAll = filterHits(contAll, flt)
+		// 过滤后的真实总数不可知（被截断的候选未验证），以过滤后命中数为准
+		contTotal = len(contAll)
 		extNameAll = filterHits(extNameAll, flt)
 		extDirAll = filterHits(extDirAll, flt)
 	}
@@ -377,17 +401,78 @@ func (e *Engine) Search(query string, limit int64) (string, error) {
 		Query:        q,
 		Elapsed:      time.Since(start).Milliseconds(),
 		Total:        len(hits),
-		TotalMatches: len(nameAll) + len(dirAll) + len(contAll) + len(extAll),
+		TotalMatches: len(nameAll) + len(dirAll) + contTotal + len(extAll),
 		TotalFiles:   len(nameAll) + len(extNameAll),
 		TotalDirs:    len(dirAll) + len(extDirAll),
-		TotalContent: len(contAll),
+		TotalContent: contTotal,
 		Hits:         hits,
 	}
 	b, err := json.Marshal(resp)
 	if err != nil {
 		return "", err
 	}
+	e.putSearchCache(key, b)
 	return string(b), nil
+}
+
+// ---- 搜索结果缓存（TTL + 容量上限的轻量 LRU）----
+
+const (
+	searchCacheTTL      = 3 * time.Second // 防抖重复输入的窗口远小于此
+	searchCacheMax      = 8               // 单响应可达数百 KB，容量克制
+	searchCacheMaxBytes = 512 << 10       // 超大响应不入缓存
+)
+
+type searchCacheEntry struct {
+	resp []byte
+	at   time.Time
+}
+
+// cachedSearch 命中返回缓存响应；过期条目顺手清除。
+func (e *Engine) cachedSearch(key string) ([]byte, bool) {
+	e.searchMu.Lock()
+	defer e.searchMu.Unlock()
+	ent, ok := e.searchCache[key]
+	if !ok {
+		return nil, false
+	}
+	if time.Since(ent.at) > searchCacheTTL {
+		delete(e.searchCache, key)
+		return nil, false
+	}
+	return ent.resp, true
+}
+
+// invalidateSearchCache 清空全部搜索缓存（索引突变点调用：扫描开始/收尾、
+// RemovePaths、AddDocumentText、ReplaceExternalEntries、Reset）。
+func (e *Engine) invalidateSearchCache() {
+	e.searchMu.Lock()
+	e.searchCache = nil
+	e.searchMu.Unlock()
+}
+
+// putSearchCache 写入缓存；容量满时淘汰最旧条目。
+func (e *Engine) putSearchCache(key string, b []byte) {
+	if len(b) > searchCacheMaxBytes {
+		return
+	}
+	now := time.Now()
+	e.searchMu.Lock()
+	defer e.searchMu.Unlock()
+	if e.searchCache == nil {
+		e.searchCache = make(map[string]searchCacheEntry, searchCacheMax)
+	}
+	if len(e.searchCache) >= searchCacheMax {
+		oldestKey := ""
+		var oldestAt time.Time
+		for k, v := range e.searchCache {
+			if oldestKey == "" || v.at.Before(oldestAt) {
+				oldestKey, oldestAt = k, v.at
+			}
+		}
+		delete(e.searchCache, oldestKey)
+	}
+	e.searchCache[key] = searchCacheEntry{resp: b, at: now}
 }
 
 // enrichContentHits 用名称索引补全全文命中的文件大小与修改时间
@@ -458,6 +543,9 @@ func (e *Engine) RemovePaths(pathsJSON string) (string, error) {
 			removed++
 		}
 	}
+	if removed > 0 {
+		e.invalidateSearchCache()
+	}
 	b, _ := json.Marshal(map[string]int{"removed": removed})
 	return string(b), nil
 }
@@ -472,6 +560,7 @@ func (e *Engine) AddDocumentText(path, text string) error {
 		return err
 	}
 	e.docsIndexed.Add(1)
+	e.invalidateSearchCache()
 	return nil
 }
 

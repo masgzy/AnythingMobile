@@ -90,7 +90,7 @@ func TestContentStoreToLowerOffsetFallback(t *testing.T) {
 	if err := cs.Add("/t.docx", orig); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	lower, _ := cs.searchAll("needle")
+	lower, _ := cs.searchAll("needle", 0)
 	if len(lower) != 1 {
 		t.Fatalf("应命中 1 条, got %d", len(lower))
 	}
@@ -108,7 +108,7 @@ func TestContentStoreSanitizeOnAdd(t *testing.T) {
 	if err := cs.Add("/x.docx", "正文\uF0B7带符号\x0b继续"); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	hits, _ := cs.searchAll("正文")
+	hits, _ := cs.searchAll("正文", 0)
 	if len(hits) != 1 {
 		t.Fatalf("应命中, got %d", len(hits))
 	}

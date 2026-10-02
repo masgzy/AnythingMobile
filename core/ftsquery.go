@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode/utf8"
 
 	index "github.com/blevesearch/bleve_index_api"
@@ -28,8 +29,20 @@ type verifiedHit struct {
 	score int
 }
 
-// searchAll 返回全部命中（排序后，不截断）与真实命中总数。
-func (c *ContentStore) searchAll(q string) ([]FileHit, int) {
+// searchAll 返回命中（按相关性降序，截断到 verifyCap）与命中总数。
+// verifyCap <= 0 表示不设上限（全量验证；兼容旧调用方与测试）。
+//
+// 性能模型（alpha16，针对高频词查询的验证阶段开销）：
+//   - ≤2 rune 词的候选集即精确命中：unigram/bigram 倒排命中 ⟺ 该词是
+//     归一化文本的精确子串（bigram 按相邻 rune 切分，索引与查询两端
+//     归一化一致），因此 total 恒精确；验证阶段只为取摘要与词边界
+//     加分，只对前 verifyCap 个候选读取存储正文；
+//   - ≥3 rune 词存在跨 bigram 假阳性（各 bigram 命中但位置不相邻，
+//     如 "会议纪要" 命中 "会议…纪要"），需逐文档读正文校验：候选数
+//     超预算时按预评分降序验证、凑满即停，total 为已验证数（下界；
+//     实际场景长词候选集小，几乎不走这条路径）；候选数不超预算时
+//     仍全量验证，total 精确。
+func (c *ContentStore) searchAll(q string, verifyCap int) ([]FileHit, int) {
 	ql := strings.ToLower(normalizeForStore(strings.TrimSpace(q)))
 	if ql == "" || c.broken.Load() {
 		return nil, 0
@@ -76,29 +89,66 @@ func (c *ContentStore) searchAll(q string) ([]FileHit, int) {
 	// ---- 第二阶段：gse 整词命中频次（词边界加权）----
 	wordFreq := c.wordFrequencies(reader, ql)
 
-	// ---- 第三阶段：存储文本精确校验 + 摘要 ----
+	// ---- 预评分排序：score = bigram 频次 + 4×整词频次。
+	// 与验证后的最终评分一致（验证不再改变 score），该序即最终序；
+	// 提前终止时按此序消费，保证截断保留的是高分文档。----
+	candidateExact := true
+	for _, t := range terms {
+		if utf8.RuneCountInString(t) > 2 {
+			candidateExact = false
+			break
+		}
+	}
+	type ordItem struct {
+		iid, ext string
+		score    int
+	}
+	order := make([]ordItem, 0, len(cand))
+	for iid := range cand {
+		ext, err := reader.ExternalID(index.IndexInternalID(iid))
+		if err != nil {
+			continue
+		}
+		order = append(order, ordItem{iid: iid, ext: ext,
+			score: cand[iid] + wordFreq[ext]*wordBonusScore})
+	}
+	if len(order) == 0 {
+		return nil, 0
+	}
+	sort.Slice(order, func(i, j int) bool {
+		if order[i].score != order[j].score {
+			return order[i].score > order[j].score
+		}
+		return order[i].ext < order[j].ext
+	})
+
+	// ---- 验证预算：候选数不超预算 => 全量验证（total 精确）；
+	// 超预算 => 只验证预评分最高的前 verifyCap 个 ----
+	capped := verifyCap > 0 && verifyCap < len(order)
+	if !capped {
+		verifyCap = len(order)
+	}
+
+	// ---- 第三阶段：存储文本精确校验 + 摘要（按预评分降序消费，
+	// 凑满 verifyCap 即提前收工）----
 	var (
 		mu      sync.Mutex
 		wg      sync.WaitGroup
 		results []verifiedHit
+		stop    atomic.Bool
 	)
 	const verifyWorkers = 4
-	ch := make(chan string, verifyWorkers)
+	ch := make(chan ordItem, verifyWorkers)
 	for w := 0; w < verifyWorkers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for iid := range ch {
-				ext, err := reader.ExternalID(index.IndexInternalID(iid))
-				if err != nil {
-					continue
-				}
-				text, ok := fetchStoredText(reader, ext)
+			for it := range ch {
+				text, ok := fetchStoredText(reader, it.ext)
 				if !ok {
 					continue
 				}
 				tl := strings.ToLower(text)
-				score := cand[iid]
 				firstOff := -1
 				verified := true
 				for _, term := range terms {
@@ -114,7 +164,6 @@ func (c *ContentStore) searchAll(q string) ([]FileHit, int) {
 				if !verified {
 					continue
 				}
-				score += wordFreq[string(ext)] * wordBonusScore
 				src := text
 				if len(tl) != len(text) {
 					// 大小写转换改变字节长度（土耳其 İ 类）：
@@ -122,26 +171,43 @@ func (c *ContentStore) searchAll(q string) ([]FileHit, int) {
 					src = tl
 				}
 				mu.Lock()
-				results = append(results, verifiedHit{
-					hit: FileHit{
-						Path:    ext,
-						Name:    baseName(ext),
-						Matched: "content",
-						Kind:    "file",
-						Snippet: snippet(src, firstOff, len(terms[0])),
-					},
-					id:    ext,
-					score: score,
-				})
+				if len(results) < verifyCap { // 通道缓冲可致微量超额，防御性截断
+					results = append(results, verifiedHit{
+						hit: FileHit{
+							Path:    it.ext,
+							Name:    baseName(it.ext),
+							Matched: "content",
+							Kind:    "file",
+							Snippet: snippet(src, firstOff, len(terms[0])),
+						},
+						id:    it.ext,
+						score: it.score,
+					})
+				}
+				done := len(results) >= verifyCap
 				mu.Unlock()
+				if done {
+					stop.Store(true)
+				}
 			}
 		}()
 	}
-	for iid := range cand {
-		ch <- iid
-	}
-	close(ch)
+	go func() {
+		for _, it := range order {
+			if stop.Load() {
+				break
+			}
+			ch <- it
+		}
+		close(ch)
+	}()
 	wg.Wait()
+
+	total := len(order)
+	if !candidateExact && capped {
+		// 长词 + 大候选集：只验证了前缀，total 为已验证数（下界）
+		total = len(results)
+	}
 
 	sort.Slice(results, func(i, j int) bool {
 		if results[i].score != results[j].score {
@@ -153,7 +219,7 @@ func (c *ContentStore) searchAll(q string) ([]FileHit, int) {
 	for i, r := range results {
 		hits[i] = r.hit
 	}
-	return hits, len(hits)
+	return hits, total
 }
 
 // candidatesForTerm 单个词的候选集：unigram 直查或 bigram 交集。

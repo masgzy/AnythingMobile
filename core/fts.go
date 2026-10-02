@@ -230,6 +230,75 @@ func (c *ContentStore) Add(path, text string) error {
 	return nil
 }
 
+// DocText 批量入库条目（AddBatch / 解析流水线攒批用）。
+type DocText struct {
+	Path string
+	Text string
+}
+
+// AddBatch 批量写入：单次 bleve Batch 提交。全量建索引时数千文档
+// 逐条提交会把 scorch 的段生成/合并开销放大数十倍（alpha16 修复），
+// 攒批后每 32 文档才产生一个段。任意环节整体失败时回退逐条 Add，
+// 隔离坏文档；返回成功数。同路径重复时后者覆盖前者（与 bleve 语义一致）。
+func (c *ContentStore) AddBatch(docs []DocText) int {
+	if c.broken.Load() || len(docs) == 0 {
+		return 0
+	}
+	// 预处理与 Add 逐条一致：归一化 → 空判断 → 截断；同路径去重保尾
+	prepared := make([]DocText, 0, len(docs))
+	seen := make(map[string]int, len(docs))
+	for _, d := range docs {
+		t := normalizeForStore(d.Text)
+		if strings.TrimSpace(t) == "" {
+			continue
+		}
+		t = truncateRunes(t, maxFTSText)
+		if t == "" {
+			continue
+		}
+		if i, ok := seen[d.Path]; ok {
+			prepared[i].Text = t
+			continue
+		}
+		seen[d.Path] = len(prepared)
+		prepared = append(prepared, DocText{Path: d.Path, Text: t})
+	}
+	if len(prepared) == 0 {
+		return 0
+	}
+
+	batch := c.idx.NewBatch()
+	for _, d := range prepared {
+		if err := batch.Index(d.Path, map[string]interface{}{
+			"big":   d.Text,
+			"words": d.Text,
+			"text":  d.Text,
+		}); err != nil {
+			return c.addOneByOne(prepared) // 罕见：构造失败，回退逐条隔离坏文档
+		}
+	}
+	if err := c.idx.Batch(batch); err != nil {
+		return c.addOneByOne(prepared)
+	}
+	c.mu.Lock()
+	for _, d := range prepared {
+		c.idSet[d.Path] = struct{}{}
+	}
+	c.mu.Unlock()
+	return len(prepared)
+}
+
+// addOneByOne 整批失败后的逐条回退：最多损失个别坏文档，不拖垮整批。
+func (c *ContentStore) addOneByOne(docs []DocText) int {
+	ok := 0
+	for _, d := range docs {
+		if c.Add(d.Path, d.Text) == nil {
+			ok++
+		}
+	}
+	return ok
+}
+
 // Remove 移除一个文档；返回是否存在。
 func (c *ContentStore) Remove(path string) bool {
 	if c.broken.Load() {

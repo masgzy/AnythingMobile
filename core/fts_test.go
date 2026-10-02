@@ -28,7 +28,7 @@ func ftsStore(t *testing.T, dir string) *ContentStore {
 
 func searchContent(t *testing.T, cs *ContentStore, q string) []FileHit {
 	t.Helper()
-	hits, n := cs.searchAll(q)
+	hits, n := cs.searchAll(q, 0)
 	if len(hits) != n {
 		t.Fatalf("命中数不一致: len=%d n=%d", len(hits), n)
 	}
@@ -167,7 +167,7 @@ func TestFTSPersistence(t *testing.T) {
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		cs2 := NewContentStore(dir)
-		hits, _ := cs2.searchAll("报表汇总")
+		hits, _ := cs2.searchAll("报表汇总", 0)
 		count := cs2.Count()
 		cs2.Close()
 		if len(hits) == 1 && count == 1 {
@@ -232,7 +232,7 @@ func TestFTSConcurrent(t *testing.T) {
 			for i := 0; i < 30; i++ {
 				p := fmt.Sprintf("/c/w%d-%d.txt", w, i)
 				_ = cs.Add(p, fmt.Sprintf("并发写入第%d条正文内容%d", i, w))
-				_, _ = cs.searchAll("并发")
+				_, _ = cs.searchAll("并发", 0)
 				if i%5 == 0 {
 					cs.Remove(fmt.Sprintf("/c/w%d-%d.txt", w, i-1))
 				}
