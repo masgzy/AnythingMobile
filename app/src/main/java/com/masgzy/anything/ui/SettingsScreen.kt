@@ -11,6 +11,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -112,6 +113,10 @@ fun SettingsScreen(
     val monetAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val shizukuState by viewModel.shizukuState.collectAsStateWithLifecycle()
     val externalCount by viewModel.externalCount.collectAsStateWithLifecycle()
+    val privCacheBytes by viewModel.privCacheBytes.collectAsStateWithLifecycle()
+
+    // 进入设置页时统计一次特权导出缓存占用
+    LaunchedEffect(Unit) { viewModel.refreshPrivCacheStats() }
 
     var showThemeModeDialog by remember { mutableStateOf(false) }
     var showPaletteSheet by remember { mutableStateOf(false) }
@@ -280,6 +285,18 @@ fun SettingsScreen(
                         else -> viewModel.requestShizukuPermission()
                     }
                 },
+            )
+
+            PreferenceCard(
+                icon = Icons.Rounded.CleaningServices,
+                title = "清理特权导出缓存",
+                subtitle = when {
+                    privCacheBytes < 0 -> "打开 Android/data 文件时产生的临时副本"
+                    privCacheBytes == 0L -> "暂无占用 · 打开 Android/data 文件时会产生临时副本"
+                    else -> "当前占用 " + formatBytes(privCacheBytes) + " · 点击释放"
+                },
+                enabled = privCacheBytes > 0,
+                onClick = { viewModel.clearPrivilegedCache() },
             )
 
             // ---- 结果 ----
@@ -1009,4 +1026,11 @@ private fun RoleColorEditor(argb: Int, onChange: (Int) -> Unit) {
             }
         })
     }
+}
+
+/** 缓存占用的简短人类可读表示（设置页特权缓存行）。 */
+internal fun formatBytes(bytes: Long): String = when {
+    bytes >= 1 shl 20 -> "%.1f MB".format(bytes / 1048576.0)
+    bytes >= 1 shl 10 -> "%.1f KB".format(bytes / 1024.0)
+    else -> "$bytes B"
 }

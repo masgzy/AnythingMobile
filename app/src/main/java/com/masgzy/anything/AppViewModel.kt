@@ -55,6 +55,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _externalCount = MutableStateFlow(0)
     val externalCount: StateFlow<Int> = _externalCount
 
+    /** Shizuku 特权导出缓存占用字节；-1 表示尚未统计（设置页展示）。 */
+    private val _privCacheBytes = MutableStateFlow(-1L)
+    val privCacheBytes: StateFlow<Long> = _privCacheBytes
+
     /** 自动扫描防抖时间戳（毫秒）。 */
     private var lastAutoScanAt = 0L
 
@@ -159,6 +163,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // externalCount() 内部同步调 stats()（JNI + JSON 解析），放 IO 线程
         viewModelScope.launch(Dispatchers.IO) {
             _externalCount.value = repo.externalCount()
+        }
+    }
+
+    /** 统计特权导出缓存占用（进入设置页时调用）。 */
+    fun refreshPrivCacheStats() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _privCacheBytes.value = repo.privilegedCacheStats().second
+        }
+    }
+
+    /** 清空特权导出缓存（打开 Android/data 文件时产生的临时副本）。 */
+    fun clearPrivilegedCache() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = repo.clearPrivilegedCache()
+            _privCacheBytes.value = if (ok) 0L else repo.privilegedCacheStats().second
+            repo.setStatusText(if (ok) "已清理特权导出缓存" else "清理失败，稍后重试")
         }
     }
 
@@ -293,8 +313,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (removedFromIndex.isNotEmpty()) {
                 repo.removePaths(removedFromIndex)
-                // 删除后重查一次，刷新当前结果
-                search(queryFlow.value)
+                // 刷新当前结果。
+                // 注意：不能走 queryFlow —— StateFlow 对相同值不重发，
+                // collect 永不触发（这正是旧版"删除后不刷新、重新搜一遍才
+                // 消失"的根因），改为直接调用搜索。
+                runCatching { repo.search(queryFlow.value) }
             }
             if (failed > 0) {
                 repo.setStatusText("有 $failed 项删除失败（可能被占用或只读）")

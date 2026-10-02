@@ -23,6 +23,12 @@ import java.nio.charset.CodingErrorAction
  */
 internal const val MAX_CHARS = 1 shl 20 // 单文档字符上限，与引擎 maxExtractText 同量级
 
+// 单文件大小上限：解析池最多 6 个 worker 并发调用本解析器，每个 worker
+// 会把整个文件 readBytes() 读入内存（copyOfRange 再复制一份），
+// 无上限时 6×20MB×2 ≈ 240MB 瞬时占用足以让低端机 OOM。
+// 超限文件跳过正文（文件名仍可搜索）；旧格式超过 20MB 已极罕见。
+internal const val MAX_FILE_BYTES = 20L * 1024 * 1024
+
 class LegacyOfficeParser : ExternalParser {
 
     companion object {
@@ -32,8 +38,9 @@ class LegacyOfficeParser : ExternalParser {
     override fun extractText(absPath: String?): String {
         if (absPath.isNullOrEmpty()) return ""
         return try {
-            val bytes = java.io.File(absPath).takeIf { it.isFile && it.length() > 0 }
-                ?.readBytes() ?: return ""
+            val bytes = java.io.File(absPath).takeIf {
+                it.isFile && it.length() in 1..MAX_FILE_BYTES
+            }?.readBytes() ?: return ""
             val ext = absPath.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
             val text = when (ext) {
                 "doc", "wps" -> DocExtractor.extract(bytes)

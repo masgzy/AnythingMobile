@@ -393,6 +393,24 @@ class EngineRepository(context: Context) {
         return path.startsWith("$base/Android/data/") || path.startsWith("$base/Android/obb/")
     }
 
+    /** Shizuku 特权导出缓存占用：（文件数, 总字节）。 */
+    fun privilegedCacheStats(): Pair<Int, Long> {
+        val dir = File(appContext.cacheDir, "shizuku_export")
+        if (!dir.isDirectory) return 0 to 0L
+        var count = 0
+        var bytes = 0L
+        dir.walkBottomUp().filter { it.isFile }.forEach {
+            count++
+            bytes += it.length()
+        }
+        return count to bytes
+    }
+
+    /** 清空特权导出缓存；返回是否成功（目录不存在视为成功）。 */
+    fun clearPrivilegedCache(): Boolean = runCatching {
+        File(appContext.cacheDir, "shizuku_export").deleteRecursively()
+    }.getOrDefault(false)
+
     /** 经 Shizuku/Stellar 把特权路径导出为缓存副本；失败返回 null。 */
     private suspend fun exportPrivileged(path: String): File? {
         if (!ShizukuAccess.ready) return null
