@@ -152,7 +152,9 @@ jobs:
       - name: 冒烟：安装 APK 并启动主界面
         run: |
           export PATH="$ANDROID_HOME/platform-tools:$PATH"
-          APK=$(ls app/build/outputs/apk/debug/*x86_64*.apk | head -1)
+          # 装 universal 整包：与用户侧载同款标准姿势（split 包单装是
+          # 非标准会话，会给后续 UTP 重装埋雷）
+          APK=$(ls app/build/outputs/apk/debug/*universal*.apk | head -1)
           echo "安装 $APK"
           adb install -r -t "$APK"
           adb logcat -c
@@ -169,6 +171,10 @@ jobs:
           fi
           adb exec-out screencap -p > anything-emulator-home.png
           ls -lh anything-emulator-home.png
+          # 卸干净冒烟安装：UTP 重装时避免与 adb 直装包做签名比对
+          # （INSTALL_FAILED_UPDATE_INCOMPATIBLE，四跑实证），让 UTP 全新装
+          adb uninstall "$PKG" || true
+          adb uninstall "$PKG.test" || true
 
       # ActivityScenario 启动链路回归（app/src/androidTest/AppLaunchTest.kt）
       - name: 仪器化测试（connectedDebugAndroidTest）
@@ -177,6 +183,7 @@ jobs:
       # ---------- 产物 ----------
 
       - name: 上传模拟器截图（直传）
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           archive: false
