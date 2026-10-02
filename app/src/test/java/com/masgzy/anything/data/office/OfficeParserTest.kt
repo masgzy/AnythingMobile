@@ -61,14 +61,15 @@ class OfficeParserTest {
 
     private fun buildDocBytes(): ByteArray {
         val wd = ByteArray(0x400)
-        // FIB：wIdent=0xA5EC；lid=0x0804（GB18030）；flags=0（未加密，用 0Table）
+        // FIB：wIdent=0xA5EC；lid=0x0804；flags=0（未加密，用 0Table）
         TestCfbBuilder.writeU16(wd, 0x00, 0xA5EC)
         TestCfbBuilder.writeU16(wd, 0x06, 0x0804)
         TestCfbBuilder.writeU16(wd, 0x0A, 0x0000)
-        // ccpText（0x4C）= 两个分片字符总数；其余 ccp 全 0
-        val piece1 = "合同项目会议纪要\r" // 压缩分片：1B/字符，GB18030
-        val p1Bytes = piece1.toByteArray(charset("GB18030"))
-        p1Bytes.copyInto(wd, 0x200) // 压缩文本放在 0x200 处
+        // 压缩分片按 MS-DOC 语义 = 1 字节/字符，中文真实文件走 UTF-16 分片，
+        // 故压缩片用 ASCII、中文放 UTF-16 片
+        val piece1 = "Part 1: summary\r"
+        val p1Bytes = piece1.toByteArray(charset("windows-1252"))
+        p1Bytes.copyInto(wd, 0x200)
         val piece2 = "第2段\u0013DATE\u00142024\u0015末尾" // 域：指令丢、结果留
         val p2Bytes = piece2.toByteArray(Charsets.UTF_16LE)
         p2Bytes.copyInto(wd, 0x300)
@@ -91,9 +92,9 @@ class OfficeParserTest {
     }
 
     @Test
-    fun `doc 抽取 压缩分片GB18030加UTF16分片与域字符过滤`() {
+    fun `doc 抽取 压缩分片加UTF16分片与域字符过滤`() {
         val text = DocExtractor.extract(buildDocBytes())
-        assertEquals("合同项目会议纪要\n第2段2024末尾", text)
+        assertEquals("Part 1: summary\n第2段2024末尾", text)
     }
 
     @Test
@@ -125,12 +126,13 @@ class OfficeParserTest {
 
     @Test
     fun `xls BIFF8 SST 低字节GB18030高字节UTF16与CONTINUE续段`() {
-        val s1 = sstString(3, 0x00, "合同表".toByteArray(charset("GB18030")))
+        // 低字节模式 cch 按字节数计（每 unit 1 字节，由码页解码器拼多字节字符）
+        val s1 = sstString(6, 0x00, "合同表".toByteArray(charset("GB18030")))
+        // 高字节模式 cch 按字符数计（每 unit 2 字节 UTF-16）
         val s2 = sstString(2, 0x01, "会议".toByteArray(Charsets.UTF_16LE))
-        // str3 "纪要备注"：SST 段内高字节输出前 2 字符，CONTINUE 段首标志 0x00
-        // 切换低字节，后 2 字符以 GB18030 解码
-        val str3Head = sstString(4, 0x01, "纪要".toByteArray(Charsets.UTF_16LE))
-        val contBody = byteArrayOf(0x00) + "备注".toByteArray(charset("GB18030"))
+        // 续段切换：cch=6 → 2 高字节字符（纪要）+ 4 低字节 unit（NOTE，ASCII）
+        val str3Head = sstString(6, 0x01, "纪要".toByteArray(Charsets.UTF_16LE))
+        val contBody = byteArrayOf(0x00) + "NOTE".toByteArray(Charsets.US_ASCII)
         val sstBody = byteArrayOf(3, 0, 0, 0, 3, 0, 0, 0) + s1 + s2 + str3Head
         val wb = biffRecord(0x0809, byteArrayOf(0x00, 0x06, 0x05, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)) +
             biffRecord(0x0042, byteArrayOf(0xA8.toByte(), 0x03)) + // CODEPAGE 936
@@ -139,15 +141,17 @@ class OfficeParserTest {
 
         val bytes = TestCfbBuilder().stream("Workbook", wb).build()
         val text = XlsExtractor.extract(bytes)
-        assertEquals("合同表\n会议\n纪要备注", text)
+        assertEquals("合同表\n会议\n纪要NOTE", text)
     }
 
     @Test
     fun `xls BIFF5 LABEL 直取`() {
         fun label(text: String, high: Boolean): ByteArray {
             val data = if (high) text.toByteArray(Charsets.UTF_16LE) else text.toByteArray(charset("GB18030"))
+            // 低字节模式 cch 按字节数计（GB18030 中文 1 字符 = 2 字节）
+            val cch = if (high) text.length else data.size
             val body = byteArrayOf(0, 0, 0, 0, 0, 0) + // row/col/xf
-                byteArrayOf((text.length and 0xFF).toByte(), 0x00, if (high) 0x01 else 0x00) + data
+                byteArrayOf((cch and 0xFF).toByte(), 0x00, if (high) 0x01 else 0x00) + data
             return biffRecord(0x0204, body)
         }
         val wb = biffRecord(0x0809, byteArrayOf(0x00, 0x05)) + // vers 0x0500 → BIFF5
@@ -158,18 +162,22 @@ class OfficeParserTest {
         assertEquals("Hello\n表格\n", XlsExtractor.extract(bytes))
     }
 
-    // ---- .ppt：记录树 + 三类文本 Atom ----
+    // ---- .ppt：记录树 + 三类文本 Atom（注意 PPT 记录头 = opts, type, len:i32） ----
+
+    private fun pptRecord(opts: Int, type: Int, body: ByteArray): ByteArray {
+        val n = body.size
+        return byteArrayOf((opts and 0xFF).toByte(), ((opts shr 8) and 0xFF).toByte(),
+            (type and 0xFF).toByte(), ((type shr 8) and 0xFF).toByte(),
+            (n and 0xFF).toByte(), ((n shr 8) and 0xFF).toByte(), 0, 0) + body
+    }
 
     @Test
     fun `ppt TextChars与TextBytes与CString三类Atom`() {
-        val textChars = biffRecord(0x0FA0, "标题页面".toByteArray(Charsets.UTF_16LE))
-        val textBytes = biffRecord(0x0FA8, "备注内容".toByteArray(charset("GB18030")))
-        val cstring = biffRecord(0x0FBA, "结尾串".toByteArray(Charsets.UTF_8))
+        val textChars = pptRecord(0x0000, 0x0FA0, "标题页面".toByteArray(Charsets.UTF_16LE))
+        val textBytes = pptRecord(0x0000, 0x0FA8, "备注内容".toByteArray(charset("GB18030")))
+        val cstring = pptRecord(0x0000, 0x0FBA, "结尾串".toByteArray(Charsets.UTF_8))
         // 一层容器把三个 Atom 包起来（opts 低 4 位 = 0xF 触发递归）
-        val containerBody = textChars + textBytes + cstring
-        val container = byteArrayOf(0x0F, 0x00, 0xE8, 0x03,
-            (containerBody.size and 0xFF).toByte(), ((containerBody.size shr 8) and 0xFF).toByte(), 0, 0) +
-            containerBody
+        val container = pptRecord(0x000F, 0x03E8, textChars + textBytes + cstring)
 
         val bytes = TestCfbBuilder().stream("PowerPoint Document", container).build()
         assertEquals("标题页面\n备注内容\n结尾串\n", PptExtractor.extract(bytes))
@@ -181,7 +189,7 @@ class OfficeParserTest {
         File.createTempFile("office_test", suffix).apply { writeBytes(bytes) }
 
     @Test
-    fun `端到端 doc/xls/ppt 文件抽取`() {
+    fun `端到端 doc xls ppt 文件抽取`() {
         val doc = tempFile(".doc", buildDocBytes())
         val xls = tempFile(".xls", run {
             val wb = biffRecord(0x0809, byteArrayOf(0x00, 0x06)) +
@@ -191,7 +199,7 @@ class OfficeParserTest {
             TestCfbBuilder().stream("Workbook", wb).build()
         })
         try {
-            assertEquals("合同项目会议纪要\n第2段2024末尾", LegacyOfficeParser().extractText(doc.absolutePath))
+            assertEquals("Part 1: summary\n第2段2024末尾", LegacyOfficeParser().extractText(doc.absolutePath))
             assertEquals("表格", LegacyOfficeParser().extractText(xls.absolutePath))
         } finally {
             doc.delete(); xls.delete()

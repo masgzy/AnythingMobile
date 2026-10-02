@@ -45,6 +45,7 @@ import androidx.compose.material.icons.rounded.Label
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.SortByAlpha
+import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Tonality
 import androidx.compose.material.icons.rounded.Wallpaper
@@ -288,7 +289,7 @@ fun SettingsScreen(
             )
 
             PreferenceCard(
-                icon = Icons.Rounded.CleaningServices,
+                icon = Icons.Rounded.DeleteSweep,
                 title = "清理特权导出缓存",
                 subtitle = when {
                     privCacheBytes < 0 -> "打开 Android/data 文件时产生的临时副本"

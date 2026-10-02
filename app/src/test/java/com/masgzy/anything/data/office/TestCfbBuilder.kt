@@ -96,7 +96,7 @@ internal class TestCfbBuilder(private val miniCutoff: Int = 4096) {
             nameBytes.copyInto(dirBytes, off)
             writeU16(dirBytes, off + 64, nameBytes.size + 2)
             dirBytes[off + 66] = type.toByte()
-            writeU32(dirBytes, off + 116, start)
+            writeU32(dirBytes, off + 116, start.toLong())
             writeU64(dirBytes, off + 120, size)
         }
         writeEntry(0, "Root Entry", 5,
@@ -116,8 +116,8 @@ internal class TestCfbBuilder(private val miniCutoff: Int = 4096) {
         // ---- 组装 ----
         val out = ByteArrayOutputStream(512 + totalSectors * SECTOR)
         val header = ByteArray(512)
-        header.writeBytes(byteArrayOf(0xD0.toByte(), 0xCF.toByte(), 0x11, 0xE0.toByte(),
-            0xA1.toByte(), 0xB1.toByte(), 0x1A, 0xE1.toByte()))
+        byteArrayOf(0xD0.toByte(), 0xCF.toByte(), 0x11, 0xE0.toByte(),
+            0xA1.toByte(), 0xB1.toByte(), 0x1A, 0xE1.toByte()).copyInto(header)
         writeU16(header, 0x1E, 9)  // 扇区 512B
         writeU16(header, 0x20, 6)  // 迷你扇区 64B
         writeU32(header, 0x2C, fatSectors.toLong())

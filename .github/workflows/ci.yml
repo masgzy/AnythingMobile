@@ -85,8 +85,8 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-${{ runner.os }}-
 
-      - name: Kotlin 单元测试（旧格式解析回归网）
-        run: ./gradlew :app:testReleaseUnitTest --no-daemon
+      - name: Kotlin 单元测试（旧格式解析回归网，debug 变体 —— AGP 9 无 release 单测任务）
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
 
       - name: 构建签名 APK（多 ABI + universal）
         run: ./gradlew :app:assembleRelease --no-daemon
