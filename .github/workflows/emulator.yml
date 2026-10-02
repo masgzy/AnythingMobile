@@ -95,12 +95,14 @@ jobs:
           echo "emulator 与系统镜像安装完成"
 
       # GitHub 托管 runner 自带嵌套虚拟化：/dev/kvm（root:kvm 组）。
-      # chmod 666 兜底组权限边缘情况；-accel check 验证 KVM 真实可用。
-      - name: KVM 硬件加速检查
+      # 注意：新版 emulator（37.x）已移除 -accel check（首跑实证：参数被
+      # 吞掉后按"无 AVD 启动"报错退出），改为验证设备节点可写；
+      # 加速的硬性兜底在启动参数 -accel on（KVM 不可用会直接报错）。
+      - name: KVM 可用性检查
         run: |
           ls -l /dev/kvm
-          sudo chmod 666 /dev/kvm || true
-          "$ANDROID_HOME/emulator/emulator" -accel check
+          sudo chmod 666 /dev/kvm
+          test -w /dev/kvm && echo "KVM 就绪（/dev/kvm 可写）"
 
       - name: 创建 AVD
         run: |
