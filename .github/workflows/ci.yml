@@ -25,7 +25,7 @@ jobs:
       #   checkout v7 / setup-go v7 / setup-java v6 / upload-artifact v7
       - uses: actions/checkout@v7
 
-      - name: 安装 Go 1.23
+      - name: 安装 Go 1.27
         uses: actions/setup-go@v7
         with:
           go-version: '1.27'
@@ -71,9 +71,10 @@ jobs:
           keytool -list -v -keystore signing/anything-release.jks \
             -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" 2>/dev/null | grep SHA256 || true
 
-      - name: 生成 Gradle Wrapper 并构建签名 APK（多 ABI + universal）
+      # Gradle Wrapper 已随仓库分发（gradlew + gradle/wrapper/*），
+      # 任何环境构建的 Gradle 版本恒为 wrapper.properties 锁定的 9.7.1，可复现
+      - name: 构建签名 APK（多 ABI + universal）
         run: |
-          gradle wrapper --gradle-version 9.7.1
           ./gradlew :app:assembleRelease --no-daemon
 
       - name: 产物清单（统一重命名为 AnythingMobile-<版本>-<abi>.apk）

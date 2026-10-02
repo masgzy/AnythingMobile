@@ -1,7 +1,8 @@
 # Gradle
 .gradle/
 build/
-!gradle/wrapper/gradle-wrapper.jar
+# Gradle Wrapper（gradlew / gradlew.bat / gradle/wrapper/*）随仓库分发，
+# 保证任何环境 `./gradlew` 即可复现构建，不要忽略。
 
 # Android Studio / IDEA
 .idea/

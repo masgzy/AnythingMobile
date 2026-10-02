@@ -66,9 +66,9 @@ jobs:
           keytool -list -v -keystore signing/anything-release.jks \
             -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" 2>/dev/null | grep SHA256 || true
 
-      - name: 生成 Gradle Wrapper 并构建 R8 收缩的签名 APK（多 ABI + universal）
+      # Gradle Wrapper 已随仓库分发，无需现场生成
+      - name: 构建 R8 收缩的签名 APK（多 ABI + universal）
         run: |
-          gradle wrapper --gradle-version 9.7.1
           ./gradlew :app:assembleRelease --no-daemon
 
       # splits 全局生效：release 产出 4 个 APK（app-*-release.apk），
