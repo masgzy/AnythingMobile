@@ -22,8 +22,8 @@ android {
         applicationId = "com.masgzy.anything"
         minSdk = 24
         targetSdk = 36
-        versionCode = 15
-        versionName = "1.0.0-alpha15"
+        versionCode = 16
+        versionName = "1.0.0-alpha16"
     }
 
     // 按 ABI 拆分产物：三种单架构 APK + 一个 universal 通吃包。
@@ -87,12 +87,21 @@ android {
         // AIDL：Shizuku/Stellar 用户服务接口（AGP 8+ 默认关闭，需显式开启）
         aidl = true
     }
+
+    // JVM 单测：LegacyOfficeParser 失败路径调 android.util.Log，
+    // 无 Robolectric 时让 Log 方法返回默认值而非抛 "not mocked"
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
     // Go 核心引擎 AAR —— 由 build-aar.sh 或 CI 生成到 app/libs/
     // 本地开发请先执行仓库根目录的 ./build-aar.sh
     implementation(files("libs/engine.aar"))
+
+    // JVM 单测：LegacyOfficeParser / CfbReader 二进制解析回归网（P0-1）
+    testImplementation("junit:junit:4.13.2")
 
     // Compose（BOM 2026.08.00：ui/foundation 1.12.0、material3 1.4.0、icons 1.7.8）
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
