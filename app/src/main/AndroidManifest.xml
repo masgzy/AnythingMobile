@@ -23,7 +23,12 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.AnythingMobile"
         android:requestLegacyExternalStorage="true"
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:allowBackup="false">
+        <!-- allowBackup=false：全盘文件名索引（index.snap）与全文索引属于
+             敏感数据清单，绝不随系统云备份 / 设备迁移离开本机，
+             与"所有数据 100% 保留在你的设备上"的隐私承诺保持一致。
+             代价是重装后需重建索引与重设偏好，可接受。 -->
 
         <activity
             android:name=".MainActivity"
