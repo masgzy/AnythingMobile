@@ -151,8 +151,8 @@ gse 中文分词（Apache-2.0）** 的持久化倒排索引，落盘应用私有
 
 1. `go vet` + `go test ./...`（引擎单元测试，无需安卓环境）
 2. `./build-aar.sh`（gomobile bind，NDK 用 runner 预装 `$ANDROID_NDK_LATEST_HOME`）
-3. `gradle wrapper --gradle-version 8.9 && ./gradlew :app:assembleDebug`
-4. 产物上传：debug APK + engine.aar
+3. `./gradlew :app:assembleRelease`（Gradle Wrapper 随仓库分发，版本锁定 9.7.1，可复现构建）
+4. 产物上传：多 ABI + universal 签名 release APK（4 份单文件直传）+ engine.aar
 
 ## 7. 里程碑
 

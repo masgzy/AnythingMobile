@@ -142,7 +142,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startScan(incremental: Boolean) {
         val context = getApplication<Application>()
-        viewModelScope.launch {
+        // IO 线程：startScan 内部的 isIndexEmpty() 会同步走 stats()（JNI + JSON），
+        // engine.startScan 本身也涉及跨界调用，均不回占主线程
+        viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 repo.startScan(StoragePermissions.scanRoots(context), incremental)
             }
@@ -154,7 +156,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // ---- Android/data 扩展扫描（Shizuku/Stellar 特权通道） ----
 
     fun refreshExternalCount() {
-        _externalCount.value = repo.externalCount()
+        // externalCount() 内部同步调 stats()（JNI + JSON 解析），放 IO 线程
+        viewModelScope.launch(Dispatchers.IO) {
+            _externalCount.value = repo.externalCount()
+        }
     }
 
     /** 设置页开关：开启立即枚举；关闭清空扩展条目（随快照同步）。 */
@@ -255,18 +260,46 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { repo.shareFile(path) }
     }
 
-    /** 删除文件/空目录并同步索引；返回成功数。 */
-    fun deleteItems(paths: List<String>): Int {
-        var deleted = 0
-        for (p in paths) {
-            if (runCatching { File(p).delete() }.getOrDefault(false)) deleted++
+    /**
+     * 删除文件/目录（递归）并同步索引；IO 线程执行。
+     * 目录会连同全部后代一起删除（walkBottomUp 自底向上），
+     * 且所有成功删除的路径（含子文件）都会从索引同步移除，
+     * 避免删目录后子文件残留在结果里。完成后刷新当前搜索结果。
+     */
+    fun deleteItems(paths: List<String>) {
+        if (paths.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val removedFromIndex = mutableListOf<String>()
+            var failed = 0
+            for (p in paths) {
+                val f = File(p)
+                // 自底向上枚举（目录自身在最后）；失败时依然尽力删除其余条目
+                val targets = runCatching {
+                    if (f.isDirectory) f.walkBottomUp().toList() else listOf(f)
+                }.getOrDefault(emptyList())
+                if (targets.isEmpty()) {
+                    failed++
+                    continue
+                }
+                var allDeleted = true
+                for (t in targets) {
+                    if (runCatching { t.delete() }.getOrDefault(false)) {
+                        removedFromIndex.add(t.absolutePath)
+                    } else {
+                        allDeleted = false
+                    }
+                }
+                if (!allDeleted) failed++
+            }
+            if (removedFromIndex.isNotEmpty()) {
+                repo.removePaths(removedFromIndex)
+                // 删除后重查一次，刷新当前结果
+                search(queryFlow.value)
+            }
+            if (failed > 0) {
+                repo.setStatusText("有 $failed 项删除失败（可能被占用或只读）")
+            }
         }
-        if (deleted > 0) {
-            repo.removePaths(paths)
-            // 删除后重查一次，刷新当前结果
-            search(queryFlow.value)
-        }
-        return deleted
     }
 
     /** 打开目录（系统文件管理器/文档 UI）。失败返回 false 由 UI 提示。 */
