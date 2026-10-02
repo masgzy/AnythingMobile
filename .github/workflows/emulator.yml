@@ -110,8 +110,13 @@ jobs:
           [ -x "$AVDM" ] || AVDM=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/avdmanager | head -1)
           # echo "no"：跳过自定义硬件配置向导交互
           echo "no" | "$AVDM" create avd -n "$AVD_NAME" -k "$SYS_IMAGE"
-          echo "AVD 创建完成："
-          "$AVDM" list avd | grep -A2 "Name: $AVD_NAME" || true
+          # 三跑实证：新版 avdmanager 走 XDG 目录（~/.config/.android/avd），
+          # 而模拟器只认 $ANDROID_AVD_HOME、$ANDROID_SDK_HOME/avd、
+          # $HOME/.android/avd 三处 —— 按实际落点导出 ANDROID_AVD_HOME
+          AVD_INI=$(find "$HOME" -name "$AVD_NAME.ini" 2>/dev/null | head -1)
+          [ -n "$AVD_INI" ] || { echo "未找到 AVD ini 文件"; exit 1; }
+          echo "AVD ini: $AVD_INI"
+          echo "ANDROID_AVD_HOME=$(dirname "$AVD_INI")" >> "$GITHUB_ENV"
 
       # 后台进程在同 job 的后续 step 中存活；日志落 /tmp 备排障
       - name: 启动模拟器并等待开机完成
@@ -122,11 +127,14 @@ jobs:
             -gpu swiftshader_indirect -accel on \
             > /tmp/emulator.log 2>&1 &
           EMU_PID=$!
+          export EMU_PID
           echo "模拟器后台启动中（PID $EMU_PID），日志 /tmp/emulator.log"
-          # 冷启动最长等 7 分钟：wait-for-device 到位后再轮询 sys.boot_completed
+          # 轮询 sys.boot_completed；进程退出则立即打日志失败 ——
+          # 不能只用 wait-for-device：模拟器秒退时它会干等满 7 分钟（三跑实证）
           timeout 420 bash -c '
-            adb wait-for-device
-            until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do
+            while true; do
+              kill -0 "$EMU_PID" 2>/dev/null || { echo "模拟器进程提前退出，日志："; cat /tmp/emulator.log; exit 1; }
+              [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ] && exit 0
               sleep 3
             done
           '
