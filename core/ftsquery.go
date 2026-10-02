@@ -171,19 +171,20 @@ func (c *ContentStore) searchAll(q string, verifyCap int) ([]FileHit, int) {
 					src = tl
 				}
 				mu.Lock()
-				if len(results) < verifyCap { // 通道缓冲可致微量超额，防御性截断
-					results = append(results, verifiedHit{
-						hit: FileHit{
-							Path:    it.ext,
-							Name:    baseName(it.ext),
-							Matched: "content",
-							Kind:    "file",
-							Snippet: snippet(src, firstOff, len(terms[0])),
-						},
-						id:    it.ext,
-						score: it.score,
-					})
-				}
+				// 注意：这里不能丢弃（丢弃会随验证完成顺序随机牺牲
+				// 在途高分文档，-race/慢机器上必现抖动）；超额由
+				// 收尾排序后统一截断，投喂侧 stop 只负责少发新任务
+				results = append(results, verifiedHit{
+					hit: FileHit{
+						Path:    it.ext,
+						Name:    baseName(it.ext),
+						Matched: "content",
+						Kind:    "file",
+						Snippet: snippet(src, firstOff, len(terms[0])),
+					},
+					id:    it.ext,
+					score: it.score,
+				})
 				done := len(results) >= verifyCap
 				mu.Unlock()
 				if done {
@@ -204,8 +205,9 @@ func (c *ContentStore) searchAll(q string, verifyCap int) ([]FileHit, int) {
 	wg.Wait()
 
 	total := len(order)
-	if !candidateExact && capped {
-		// 长词 + 大候选集：只验证了前缀，total 为已验证数（下界）
+	if !candidateExact {
+		// 长词需逐文档校验剔除跨 bigram 假阳性，以验证后计数为准：
+		// 无预算时即精确总数；有预算时为已验证数（下界，含在途完成）
 		total = len(results)
 	}
 
@@ -215,6 +217,10 @@ func (c *ContentStore) searchAll(q string, verifyCap int) ([]FileHit, int) {
 		}
 		return results[i].id < results[j].id
 	})
+	// 截断必须在排序之后：在途完成的条目可能比先完成的更高分
+	if len(results) > verifyCap {
+		results = results[:verifyCap]
+	}
 	hits := make([]FileHit, len(results))
 	for i, r := range results {
 		hits[i] = r.hit
@@ -287,6 +293,8 @@ func (c *ContentStore) collectPostings(reader index.IndexReader, term, field str
 }
 
 // wordFrequencies 查询词经 gse 切词后，各整词在 words 字段的命中频次合计。
+// 返回以外部 ID（路径）为键 —— alpha14 及之前误用内部 ID 作键，
+// 查询侧按路径取值恒为 0，词边界加权实际从未生效（alpha16 修复）。
 func (c *ContentStore) wordFrequencies(reader index.IndexReader, ql string) map[string]int {
 	seg := sharedSegmenter()
 	var tokens []string
@@ -300,7 +308,11 @@ func (c *ContentStore) wordFrequencies(reader index.IndexReader, ql string) map[
 	for _, tok := range tokens {
 		freqs, _ := c.collectPostings(reader, tok, "words", false)
 		for id, f := range freqs {
-			out[id] += f
+			if ext, err := reader.ExternalID(index.IndexInternalID(id)); err == nil {
+				out[ext] += f
+			} else {
+				out[id] += f // 兜底：转不出外部 ID 时保持原键
+			}
 		}
 	}
 	return out
