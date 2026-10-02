@@ -29,12 +29,15 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: '1.27'
+          # go.mod 在 core/ 子目录，不指定则 setup-go 的模块缓存探测落空
+          cache-dependency-path: core/go.sum
 
-      - name: Go 引擎测试（go vet + go test）
+      - name: Go 引擎测试（go vet + go test -race）
         run: |
           cd core
           go vet ./...
-          go test ./... -v
+          # -race：仓库里有并发写入/并发搜索测试，不开 race 检测等于白写
+          go test -race ./... -v
 
       - name: 安装 JDK 17
         uses: actions/setup-java@v6
@@ -73,9 +76,20 @@ jobs:
 
       # Gradle Wrapper 已随仓库分发（gradlew + gradle/wrapper/*），
       # 任何环境构建的 Gradle 版本恒为 wrapper.properties 锁定的 9.7.1，可复现
+      - name: Gradle 依赖缓存
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Kotlin 单元测试（旧格式解析回归网）
+        run: ./gradlew :app:testReleaseUnitTest --no-daemon
+
       - name: 构建签名 APK（多 ABI + universal）
-        run: |
-          ./gradlew :app:assembleRelease --no-daemon
+        run: ./gradlew :app:assembleRelease --no-daemon
 
       - name: 产物清单（统一重命名为 AnythingMobile-<版本>-<abi>.apk）
         run: |
