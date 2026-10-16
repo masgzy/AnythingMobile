@@ -2,6 +2,7 @@ package com.masgzy.anything.data
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Environment
 import androidx.core.content.FileProvider
 import com.masgzy.anything.core.Engine
@@ -346,12 +347,37 @@ class EngineRepository(context: Context) {
     }
 
     /**
+     * SAF 注入通道：把宿主遍历得到的条目 JSON 喂给引擎整体重建主索引。
+     * 引擎忙（常规扫描进行中）返回 false，由调用方提示稍后再试。
+     */
+    fun ingest(entriesJSON: String): Boolean {
+        val eng = engine ?: return false
+        return runCatching { eng.ingest(entriesJSON) }.isSuccess
+    }
+
+    /** SAF 全文抽取：读字节后转调引擎 ExtractDoc（落临时文件复用同一套解析分发）。 */
+    fun extractDoc(name: String, data: ByteArray): String? {
+        val eng = engine ?: return null
+        return runCatching { eng.extractDoc(name, data) }.getOrNull()
+    }
+
+    /**
      * 用系统查看器打开命中的文件。
      * Android/data 等特权路径对应用进程不可读：先经 Shizuku/Stellar
      * 导出为缓存副本再打开（未授权或导出失败返回 false 由 UI 提示）。
      */
     suspend fun openFile(path: String): Boolean = withContext(Dispatchers.IO) {
         runCatching {
+            // SAF 命中：条目路径是 content URI，直接交系统查看器（授权已随树持久化）
+            if (path.startsWith("content:")) {
+                val uri = Uri.parse(path)
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, appContext.contentResolver.getType(uri) ?: "*/*")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                appContext.startActivity(intent)
+                return@runCatching true
+            }
             var file = File(path)
             if (!file.exists()) {
                 if (!isPrivilegedPath(path)) return@runCatching false
@@ -370,6 +396,19 @@ class EngineRepository(context: Context) {
     /** 分享文件（详情页"发送"）；特权路径先导出缓存副本。 */
     suspend fun shareFile(path: String): Boolean = withContext(Dispatchers.IO) {
         runCatching {
+            // SAF 命中：content URI 直接作为分享流
+            if (path.startsWith("content:")) {
+                val uri = Uri.parse(path)
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = appContext.contentResolver.getType(uri) ?: "*/*"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                appContext.startActivity(Intent.createChooser(intent, "发送").apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+                return@runCatching true
+            }
             var file = File(path)
             if (!file.exists()) {
                 if (!isPrivilegedPath(path)) return@runCatching false

@@ -37,14 +37,17 @@ import androidx.compose.material.icons.rounded.Colorize
 import androidx.compose.material.icons.rounded.Contrast
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderSpecial
 import androidx.compose.material.icons.rounded.InvertColors
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Label
+import androidx.compose.material.icons.rounded.LensBlur
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.SortByAlpha
+import androidx.compose.material.icons.rounded.SpaceDashboard
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Tonality
@@ -219,6 +222,36 @@ fun SettingsScreen(
                 },
             )
 
+            PreferenceCard(
+                icon = Icons.Rounded.SpaceDashboard,
+                title = "悬浮分页底栏",
+                subtitle = "底部悬浮胶囊式页签（搜索/目录/设置），默认开启；" +
+                    "关闭后改为通栏底栏",
+                trailing = {
+                    Switch(
+                        checked = settings.showPaginator,
+                        onCheckedChange = { viewModel.setShowPaginator(it) },
+                    )
+                },
+            )
+
+            PreferenceCard(
+                icon = Icons.Rounded.LensBlur,
+                title = "液态玻璃底栏",
+                subtitle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    "底栏玻璃质感：背景模糊 + 折射高光（NPatch 同款实现）"
+                } else {
+                    "需要 Android 13 及以上版本"
+                },
+                enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
+                trailing = {
+                    Switch(
+                        checked = settings.liquidGlass,
+                        onCheckedChange = { viewModel.setLiquidGlass(it) },
+                    )
+                },
+            )
+
             // ---- 索引 ----
             SectionHeader("索引")
 
@@ -251,6 +284,19 @@ fun SettingsScreen(
                 else "清空后重新扫描全部文件，耗时较长",
                 enabled = !scanning && repoState.ready,
                 onClick = { viewModel.startScan(incremental = false) },
+            )
+
+            PreferenceCard(
+                icon = Icons.Rounded.Folder,
+                title = "仅搜索选定目录",
+                subtitle = "开启后索引只覆盖「目录」页授权的目录；" +
+                    "关闭则全盘扫描",
+                trailing = {
+                    Switch(
+                        checked = settings.scopedSearchOnly,
+                        onCheckedChange = { viewModel.setScopedSearchOnly(it) },
+                    )
+                },
             )
 
             // ---- 扩展扫描（Shizuku / Stellar） ----
@@ -333,8 +379,12 @@ fun SettingsScreen(
             PreferenceCard(
                 icon = Icons.Rounded.Info,
                 title = "版本",
-                subtitle = "${BuildConfig.VERSION_NAME} · Apache-2.0",
+                subtitle = "${BuildConfig.VERSION_NAME} · GPL-3.0",
             )
+
+            // ---- 关于 ----
+            SectionHeader("关于")
+            AboutContent()
         }
     }
 

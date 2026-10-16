@@ -1,5 +1,6 @@
 package com.masgzy.anything
 
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -14,21 +15,29 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.masgzy.anything.crash.CrashReporter
-import com.masgzy.anything.ui.AboutScreen
+import com.masgzy.anything.ui.DirectoryScreen
+import com.masgzy.anything.ui.FloatingBottomBar
 import com.masgzy.anything.ui.ROUTE_ABOUT
 import com.masgzy.anything.ui.ROUTE_SETTINGS
 import com.masgzy.anything.ui.ROUTE_WELCOME
@@ -36,20 +45,22 @@ import com.masgzy.anything.ui.SearchScreen
 import com.masgzy.anything.ui.SettingsScreen
 import com.masgzy.anything.ui.WelcomeScreen
 import com.masgzy.anything.ui.theme.AnythingTheme
-import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 
 /**
- * 应用入口：主题（外观设置实时生效）+ 带过渡动画的路由
- * （主界面 / 设置 / 关于 / 首次引导页）。
+ * 应用入口：主题（外观设置实时生效）+ 底栏三 tab（搜索/目录/设置）+ 首次引导页。
  *
- * 导航行为：
- *  - 设置/关于从侧边栏进入；返回（左上角箭头或系统返回键）
- *    回到主界面并重新打开侧边栏，而不是退出应用；
- *  - 侧边栏状态提升至此，跨路由保持，返回时可直接重开。
+ * 导航行为（alpha17 底栏重构）：
+ *  - 主界面为三页 tab（悬浮分页底栏切换，默认开；可在设置改通栏）；
+ *  - 抽屉里的设置/关于入口同样落在对应 tab；关于内容已并入设置页底部；
+ *  - 引导页仅在首启出现，完成后进入搜索 tab。
  *
- * 自动索引更新：SearchScreen 内部在 ON_RESUME 调用
- * AppViewModel.autoScanIfNeed()；引擎就绪时 ViewModel 也会补发一次
- * （索引已持久化，增量扫描通常一闪而过）。
+ * 液态玻璃（NPatch FloatingGlassBottomBar 同款）：设置开启且 Android 13+ 时，
+ * 内容层经 layerBackdrop 逐帧录制，底栏 LiquidGlass 模式采样折射；
+ * 内容延伸到底栏之下（玻璃取样需要），滚动列表尾部用 contentPadding 预留。
+ *
+ * 自动索引更新：SearchScreen 内部在 ON_RESUME 调用 AppViewModel.autoScanIfNeed()。
  */
 class MainActivity : ComponentActivity() {
 
@@ -78,7 +89,16 @@ private fun Root(
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     AnythingTheme(settings = settings) {
-        AppNav(viewModel, onRequestAllFiles)
+        // 首启引导后进入主壳；设置页「重看引导」可回跳
+        var showWelcome by rememberSaveable { mutableStateOf(!settings.welcomeSeen) }
+        if (showWelcome) {
+            WelcomeScreen(onFinish = {
+                viewModel.markWelcomeSeen()
+                showWelcome = false
+            })
+        } else {
+            MainShell(viewModel, onRequestAllFiles, onShowWelcome = { showWelcome = true })
+        }
     }
     // 上一次崩溃未分享的报告：启动时提示用户分享（崩溃页拉起失败时的兜底入口）
     val activityContext = LocalContext.current as? android.app.Activity
@@ -109,79 +129,92 @@ private fun Root(
     }
 }
 
-/** 各路由的层级深度：主界面 0，设置/关于 1，引导页 2。决定转场滑动方向。 */
-private fun routeDepth(route: String): Int = when (route) {
-    "main" -> 0
-    ROUTE_WELCOME -> 2
-    else -> 1
-}
-
+/**
+ * 主壳：三页 tab + 分页底栏 + 液态玻璃 backdrop 录制。
+ *
+ * 层次（与 NPatch MainScreen 同构）：
+ *   Box(表面底色)
+ *     ├─ 内容层：layerBackdrop(backdrop) 录制（玻璃取样源，含底色打底）
+ *     └─ FloatingBottomBar(悬浮时叠在内容之上；通栏时在内容流内)
+ */
 @Composable
-private fun AppNav(
+private fun MainShell(
     viewModel: AppViewModel,
     onRequestAllFiles: () -> Unit,
+    onShowWelcome: () -> Unit,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
-    var route by remember {
-        mutableStateOf(if (settings.welcomeSeen) "main" else ROUTE_WELCOME)
-    }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+
     val drawerState = rememberDrawerState(DrawerValue.Closed)
-    val scope = rememberCoroutineScope()
 
-    // 设置/关于返回：回到主界面并重新打开侧边栏（用户从此处进入）。
-    // 抽屉用 snapTo 瞬时打开而非动画展开：与路由转场同时进行的两段动画
-    // 会在中端机上掉帧（实测明显卡顿），瞬时展开则只余一段转场，观感干脆。
-    val backToDrawer: () -> Unit = {
-        route = "main"
-        scope.launch { drawerState.snapTo(DrawerValue.Open) }
+    // 液态玻璃门控：与 NPatch 一致，AGSL 折射 shader 需要 Android 13（Tiramisu）
+    val glass = settings.liquidGlass &&
+        settings.showPaginator &&
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+    // 页面层录制（玻璃取样源）：surface 打底避免透明区域穿透到窗口
+    val surface = MaterialTheme.colorScheme.surface
+    val backdrop = if (glass) {
+        rememberLayerBackdrop { drawRect(surface); drawContent() }
+    } else {
+        null
     }
 
-    // 拦截系统返回键，与左上角返回箭头行为一致
-    BackHandler(enabled = route == ROUTE_SETTINGS || route == ROUTE_ABOUT) {
-        backToDrawer()
-    }
+    // 目录/设置 tab 返回回搜索 tab（与底栏 tab 语义一致）
+    BackHandler(enabled = tab != 0) { tab = 0 }
 
-    AnimatedContent(
-        targetState = route,
-        transitionSpec = {
-            // M3 fade-through 转场：旧页 60~90ms 快速淡出，新页延迟后
-            // 淡入并从 92% 轻微放大。相比旧的全宽滑动，缩放是纯
-            // graphicsLayer 变换、不触发重新测量，两块重组件同屏时的
-            // 开销大幅降低 —— 这是从设置返回主界面卡顿的根因。
-            val goingDeeper = routeDepth(targetState) > routeDepth(initialState)
-            if (goingDeeper) {
-                fadeIn(
-                    tween(210, delayMillis = 70, easing = LinearOutSlowInEasing),
-                ) + scaleIn(
-                    initialScale = 0.92f,
-                    animationSpec = tween(280, delayMillis = 70, easing = FastOutSlowInEasing),
-                ) togetherWith fadeOut(tween(70, easing = FastOutSlowInEasing))
-            } else {
-                fadeIn(tween(220, easing = LinearOutSlowInEasing)) togetherWith
-                    fadeOut(tween(90, easing = FastOutSlowInEasing))
-            }
-        },
-        label = "nav",
-    ) { r ->
-        when (r) {
-            ROUTE_WELCOME -> WelcomeScreen(
-                onFinish = {
-                    viewModel.markWelcomeSeen()
-                    route = "main"
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(surface),
+    ) {
+        // —— 内容层（玻璃 backdrop 的录制源）——
+        Box(
+            Modifier
+                .fillMaxSize()
+                .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
+        ) {
+            AnimatedContent(
+                targetState = tab,
+                transitionSpec = {
+                    // M3 fade-through：旧页 70ms 快速淡出，新页延迟后淡入并轻微放大
+                    fadeIn(
+                        tween(210, delayMillis = 70, easing = LinearOutSlowInEasing),
+                    ) + scaleIn(
+                        initialScale = 0.96f,
+                        animationSpec = tween(280, delayMillis = 70, easing = FastOutSlowInEasing),
+                    ) togetherWith fadeOut(tween(70, easing = FastOutSlowInEasing))
                 },
-            )
-            ROUTE_SETTINGS -> SettingsScreen(
-                viewModel = viewModel,
-                onBack = backToDrawer,
-                onShowWelcome = { route = ROUTE_WELCOME },
-            )
-            ROUTE_ABOUT -> AboutScreen(onBack = backToDrawer)
-            else -> SearchScreen(
-                viewModel = viewModel,
-                onRequestAllFiles = onRequestAllFiles,
-                onNavigate = { route = it },
-                drawerState = drawerState,
-            )
+                label = "tab",
+            ) { t ->
+                when (t) {
+                    1 -> DirectoryScreen(viewModel)
+                    2 -> SettingsScreen(
+                        viewModel = viewModel,
+                        onBack = { tab = 0 },
+                        onShowWelcome = onShowWelcome,
+                    )
+                    else -> SearchScreen(
+                        viewModel = viewModel,
+                        onRequestAllFiles = onRequestAllFiles,
+                        onNavigate = { route ->
+                            // 抽屉入口落到底栏 tab：设置/关于 → 设置 tab（关于已并入设置页）
+                            if (route == ROUTE_SETTINGS || route == ROUTE_ABOUT) tab = 2
+                        },
+                        drawerState = drawerState,
+                    )
+                }
+            }
         }
+
+        // —— 分页底栏（悬浮时叠内容之上，玻璃实时取样内容层）——
+        FloatingBottomBar(
+            selected = tab,
+            onSelect = { tab = it },
+            floating = settings.showPaginator,
+            glass = glass,
+            backdrop = backdrop,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 }

@@ -26,3 +26,5 @@ keystore.properties
 signing/
 *.jks
 *.keystore
+app/libs/engine.aar
+app/libs/engine-sources.jar

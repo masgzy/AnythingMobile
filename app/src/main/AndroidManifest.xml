@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- miuix-blur（液态玻璃底栏）声明 minSdk 33；本应用 minSdk 24，
+         但玻璃路径已双重门控：设置开关在 <33 禁用 + 代码层 SDK_INT>=TIRAMISU
+         才进入 LiquidGlass/Blur 模式（None 模式仅用纯 Compose API），
+         故安全覆盖合并声明。 -->
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
 
     <!-- 刻意不声明 INTERNET 权限：纯离线是本应用的核心承诺。
          gomobile 生成的 AAR manifest 亦不含任何权限（见 x/mobile bind_androidapp.go）。 -->

@@ -28,6 +28,9 @@ import com.masgzy.anything.ui.theme.PaletteStyle
  *   - 筛选文字显示时长：点「所有」展开类别钮后，文字标签自动显示的时长
  *     （5 秒后消失，点击重新显示；可选不显示/3/5/10 秒/常驻）；
  *   - 结果排序：按名称 / 按时间（对应原版 FileSortSettings.NAME/TIME）；
+ *   - 悬浮分页底栏：结果超一页时底部悬浮翻页条（默认开启）；
+ *   - 液态玻璃底栏：底栏毛玻璃质感（Android 12+ 完整效果，默认关）；
+ *   - 搜索范围：仅搜索选定目录（SAF 文件夹选择器授权，目录清单一并持久化）；
  *   - 首次启动引导页标记。
  *
  * 存储选用 SharedPreferences：读轻量同步（主题冷启动即需），写经 apply 异步。
@@ -49,6 +52,14 @@ data class AppSettings(
     /** 筛选钮文字标签显示时长（秒）：0=不自动显示，-1=常驻，>0=自动隐藏秒数。 */
     val filterLabelSeconds: Int = 5,
     val sortByName: Boolean = true,
+    /** 悬浮分页底栏：结果超一页时显示悬浮翻页条（默认开启）。 */
+    val showPaginator: Boolean = true,
+    /** 液态玻璃底栏：底栏/翻页条毛玻璃质感（Android 12+ 完整效果）。 */
+    val liquidGlass: Boolean = false,
+    /** 仅搜索选定目录：false=全盘；true=只索引 searchDirs 里的目录。 */
+    val scopedSearchOnly: Boolean = false,
+    /** 已授权搜索目录（SAF tree URI 列表，JSON 存储持久化授权）。 */
+    val searchDirs: List<String> = emptyList(),
     val welcomeSeen: Boolean = false,
 )
 
@@ -107,6 +118,13 @@ class SettingsRepository(context: Context) {
         scanAndroidData = prefs.getBoolean(KEY_SCAN_ANDROID_DATA, false),
         filterLabelSeconds = prefs.getInt(KEY_FILTER_LABEL_SECONDS, 5),
         sortByName = prefs.getBoolean(KEY_SORT_NAME, true),
+        showPaginator = prefs.getBoolean(KEY_SHOW_PAGINATOR, true),
+        liquidGlass = prefs.getBoolean(KEY_LIQUID_GLASS, false),
+        scopedSearchOnly = prefs.getBoolean(KEY_SCOPED_SEARCH, false),
+        searchDirs = runCatching {
+            val arr = org.json.JSONArray(prefs.getString(KEY_SEARCH_DIRS, "[]") ?: "[]")
+            (0 until arr.length()).map { arr.getString(it) }
+        }.getOrDefault(emptyList()),
         welcomeSeen = prefs.getBoolean(KEY_WELCOME_SEEN, false),
     )
 
@@ -141,6 +159,18 @@ class SettingsRepository(context: Context) {
 
     fun setSortByName(v: Boolean) = put(KEY_SORT_NAME, v)
 
+    fun setShowPaginator(v: Boolean) = put(KEY_SHOW_PAGINATOR, v)
+
+    fun setLiquidGlass(v: Boolean) = put(KEY_LIQUID_GLASS, v)
+
+    fun setScopedSearchOnly(v: Boolean) = put(KEY_SCOPED_SEARCH, v)
+
+    fun setSearchDirs(dirs: List<String>) {
+        val arr = org.json.JSONArray()
+        dirs.forEach { arr.put(it) }
+        prefs.edit { putString(KEY_SEARCH_DIRS, arr.toString()) }
+    }
+
     fun setWelcomeSeen(v: Boolean) = put(KEY_WELCOME_SEEN, v)
 
     private fun put(key: String, value: String) = prefs.edit { putString(key, value) }
@@ -166,6 +196,10 @@ class SettingsRepository(context: Context) {
         private const val KEY_SCAN_ANDROID_DATA = "scan_android_data"
         private const val KEY_FILTER_LABEL_SECONDS = "filter_label_seconds"
         private const val KEY_SORT_NAME = "sort_by_name"
+        private const val KEY_SHOW_PAGINATOR = "show_paginator"
+        private const val KEY_LIQUID_GLASS = "liquid_glass"
+        private const val KEY_SCOPED_SEARCH = "scoped_search_only"
+        private const val KEY_SEARCH_DIRS = "search_dirs"
         private const val KEY_WELCOME_SEEN = "welcome_seen"
 
         @Volatile

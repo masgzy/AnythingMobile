@@ -12,6 +12,7 @@ import com.masgzy.anything.data.AppSettings
 import com.masgzy.anything.data.EngineRepository
 import com.masgzy.anything.data.ScanPhase
 import com.masgzy.anything.data.ScanSummary
+import com.masgzy.anything.data.SafDirs
 import com.masgzy.anything.data.SettingsRepository
 import com.masgzy.anything.data.ShizukuAccess
 import com.masgzy.anything.data.ThemeMode
@@ -118,6 +119,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             setScanAndroidData(next.scanAndroidData)
             setFilterLabelSeconds(next.filterLabelSeconds)
             setSortByName(next.sortByName)
+            setShowPaginator(next.showPaginator)
+            setLiquidGlass(next.liquidGlass)
+            setScopedSearchOnly(next.scopedSearchOnly)
+            setSearchDirs(next.searchDirs)
         }
     }
 
@@ -125,6 +130,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         settingsRepo.setWelcomeSeen(true)
         _settings.value = _settings.value.copy(welcomeSeen = true)
     }
+
+    /** 悬浮分页底栏（默认开）。 */
+    fun setShowPaginator(v: Boolean) = updateSettings { s -> s.copy(showPaginator = v) }
+
+    /** 液态玻璃底栏（悬浮形态 + Android 13+ 才完整生效）。 */
+    fun setLiquidGlass(v: Boolean) = updateSettings { s -> s.copy(liquidGlass = v) }
+
+    /** 搜索范围：仅选定目录 / 全盘。 */
+    fun setScopedSearchOnly(v: Boolean) = updateSettings { s -> s.copy(scopedSearchOnly = v) }
 
     // ---- 索引更新 ----
 
@@ -150,12 +164,82 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // engine.startScan 本身也涉及跨界调用，均不回占主线程
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
+                // 搜索范围 = 仅选定目录且全部可映射为物理路径：只扫这些根
+                //（复用常规遍历/解析管线，增量语义不变）；存在不可映射目录
+                // 时索引由 SAF 注入通道负责（目录页手动同步），此处不动
+                val s = _settings.value
+                if (s.scopedSearchOnly && s.searchDirs.isNotEmpty()) {
+                    val mapped = s.searchDirs.map { SafDirs.treeToPath(context, it) }
+                    if (mapped.all { it != null }) {
+                        repo.startScan(mapped.filterNotNull().toTypedArray(), incremental)
+                        return@runCatching
+                    }
+                    if (!StoragePermissions.hasStorageAccess(context) ||
+                        mapped.any { it == null }
+                    ) {
+                        return@runCatching // SAF 通道管理的索引，不按全盘重建覆盖
+                    }
+                }
                 repo.startScan(StoragePermissions.scanRoots(context), incremental)
             }
         }
     }
 
     fun cancelScan() = repo.cancelScan()
+
+    // ---- 目录页（SAF 文件夹选择器授权）----
+
+    /** 添加已授权目录（UI 回调里已 takePersistableUriPermission）。 */
+    fun addSearchDir(uriStr: String) {
+        updateSettings { s -> s.copy(searchDirs = (s.searchDirs + uriStr).distinct()) }
+        settingsRepo.setSearchDirs(_settings.value.searchDirs)
+    }
+
+    /** 移除目录并释放持久化授权。 */
+    fun removeSearchDir(uriStr: String) {
+        SafDirs.release(getApplication(), uriStr)
+        updateSettings { s -> s.copy(searchDirs = s.searchDirs - uriStr) }
+        settingsRepo.setSearchDirs(_settings.value.searchDirs)
+    }
+
+    /**
+     * 目录页"同步索引"：作用域开关决定语义 ——
+     *  - 仅选定目录：全部可映射且已授所有文件访问 → 常规扫描（快）；
+     *    否则 SAF 遍历 + Ingest 注入（content:// 的唯一通路）；
+     *  - 全盘：等同常规增量扫描（目录清单仅作为授权记录保留）。
+     */
+    fun syncDirIndex() {
+        val context = getApplication<Application>()
+        val s = _settings.value
+        if (repo.state.value.phase != com.masgzy.anything.data.ScanPhase.IDLE) return
+        if (!s.scopedSearchOnly) {
+            startScan(incremental = false)
+            return
+        }
+        if (s.searchDirs.isEmpty()) {
+            repo.setStatusText("尚未授权任何目录")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val mapped = s.searchDirs.map { SafDirs.treeToPath(context, it) }
+            if (mapped.all { it != null } && StoragePermissions.hasStorageAccess(context)) {
+                repo.startScan(mapped.filterNotNull().toTypedArray(), incremental = false)
+            } else {
+                repo.setStatusText("正在遍历目录…")
+                val json = SafDirs.collectEntries(
+                    context,
+                    s.searchDirs,
+                    extractDoc = { name, bytes -> repo.extractDoc(name, bytes) },
+                    onProgress = { n -> repo.setStatusText("已收录 $n 项…") },
+                )
+                if (json == null) {
+                    repo.setStatusText("目录授权已失效，请重新添加")
+                } else if (!repo.ingest(json)) {
+                    repo.setStatusText("引擎忙，稍后再试")
+                }
+            }
+        }
+    }
 
     // ---- Android/data 扩展扫描（Shizuku/Stellar 特权通道） ----
 
