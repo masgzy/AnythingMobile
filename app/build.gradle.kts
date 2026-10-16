@@ -22,8 +22,8 @@ android {
         applicationId = "com.masgzy.anything"
         minSdk = 24
         targetSdk = 36
-        versionCode = 16
-        versionName = "1.0.0-alpha16"
+        versionCode = 17
+        versionName = "1.0.0-alpha17"
         // 仪器化测试跑在 Android 虚拟机上（.github/workflows/emulator.yml）
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -131,6 +131,9 @@ dependencies {
     implementation("com.materialkolor:material-color-utilities:5.0.1")
 
     implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.documentfile:documentfile:1.0.1")
+    // 液态玻璃底栏（NPatch 同款实现的外部依赖）：backdrop 采样/折射 API
+    implementation("top.yukonga.miuix.kmp:miuix-blur:0.9.4")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.core:core-ktx:1.19.0")
