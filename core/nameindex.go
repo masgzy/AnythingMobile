@@ -47,7 +47,15 @@ func NewNameIndex(kind string) *NameIndex {
 func (n *NameIndex) Add(path string, size, mtime int64) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.insertLocked(path, size, mtime)
+	n.insertNamedLocked(path, filepath.Base(path), size, mtime)
+}
+
+// AddNamed 显式指定显示名加入索引（SAF/DocumentsProvider 注入通道：
+// 条目路径可能是 content URI，filepath.Base 取不到真实文件名）。
+func (n *NameIndex) AddNamed(path, name string, size, mtime int64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.insertNamedLocked(path, name, size, mtime)
 }
 
 // AddBatch 批量加入名称，语义与多次调用 Add 完全一致（同路径先删旧记录），
@@ -66,8 +74,12 @@ func (n *NameIndex) AddBatch(items []nameRecord) {
 
 // insertLocked 插入一条记录（同路径先删旧记录）。调用方需持有写锁。
 func (n *NameIndex) insertLocked(path string, size, mtime int64) {
-	base := filepath.Base(path)
-	lower := strings.ToLower(base)
+	n.insertNamedLocked(path, filepath.Base(path), size, mtime)
+}
+
+// insertNamedLocked 按给定显示名插入（调用方需持有写锁）。
+func (n *NameIndex) insertNamedLocked(path, name string, size, mtime int64) {
+	lower := strings.ToLower(name)
 	if lower == "" {
 		return
 	}
@@ -79,7 +91,7 @@ func (n *NameIndex) insertLocked(path string, size, mtime int64) {
 
 	id := n.next
 	n.next++
-	doc := &docInfo{path: path, name: base, lower: lower, size: size, mtime: mtime}
+	doc := &docInfo{path: path, name: name, lower: lower, size: size, mtime: mtime}
 	n.docs[id] = doc
 	n.byPath[path] = id
 	for _, g := range bigrams(lower) {

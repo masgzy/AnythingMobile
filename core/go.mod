@@ -35,5 +35,9 @@ require (
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/vcaesar/cedar v0.50.0 // indirect
 	go.etcd.io/bbolt v1.3.7 // indirect
-	golang.org/x/sys v0.13.0 // indirect
+	golang.org/x/mobile v0.0.0-20261011034528-197770444867 // indirect
+	golang.org/x/mod v0.42.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/tools v0.52.0 // indirect
 )
