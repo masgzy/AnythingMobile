@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 快捷磁贴图标：纯白透明底放大镜（QS 磁贴要求单色） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M10.5,4 A6.5,6.5 0 1 0 10.5,17.5 A6.5,6.5 0 1 0 10.5,4 Z"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2" />
+
+    <path
+        android:pathData="M15.4,15.4 L20,20"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="2.2" />
+</vector>

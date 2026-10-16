@@ -1,0 +1,28 @@
+# Gradle
+.gradle/
+build/
+# Gradle Wrapper（gradlew / gradlew.bat / gradle/wrapper/*）随仓库分发，
+# 保证任何环境 `./gradlew` 即可复现构建，不要忽略。
+
+# Android Studio / IDEA
+.idea/
+*.iml
+captures/
+local.properties
+
+# 构建产物（AAR 由 build-aar.sh / CI 生成，不入库）
+app/libs/*.aar
+
+# Go
+core/engine
+*.test
+core/coverage.out
+
+# 系统
+.DS_Store
+
+# 签名（证书与口令绝不入库，仅存在于 GitHub Secrets 与本地）
+keystore.properties
+signing/
+*.jks
+*.keystore

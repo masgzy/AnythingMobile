@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 刻意不声明 INTERNET 权限：纯离线是本应用的核心承诺。
+         gomobile 生成的 AAR manifest 亦不含任何权限（见 x/mobile bind_androidapp.go）。 -->
+    <!-- Android 12 及以下访问共享存储 -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <!-- Android 11+ 全盘文件访问（文件搜索属官方许可场景） -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!-- Shizuku / Stellar 特权通道（扫描 Android/data 等受限目录）。
+         Stellar 内置 Shizuku 兼容层：声明官方 ShizukuProvider 与管理器
+         权限即可被 Shizuku 与 Stellar 两者支持。 -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/Theme.AnythingMobile"
+        android:requestLegacyExternalStorage="true"
+        android:supportsRtl="true"
+        android:allowBackup="false">
+        <!-- allowBackup=false：全盘文件名索引（index.snap）与全文索引属于
+             敏感数据清单，绝不随系统云备份 / 设备迁移离开本机，
+             与"所有数据 100% 保留在你的设备上"的隐私承诺保持一致。
+             代价是重装后需重建索引与重设偏好，可接受。 -->
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 崩溃报告页：独立进程运行，主进程 OOM 崩溃时也能展示/分享日志 -->
+        <activity
+            android:name=".crash.CrashReportActivity"
+            android:exported="false"
+            android:process=":crash" />
+
+        <!-- 下拉快捷设置磁贴：一键进入搜索（对标原版 QuickStartTileService） -->
+        <service
+            android:name=".tile.QuickSearchTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_search"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+        </service>
+
+        <!-- 文件分享（对标原版 share_extend） -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- Shizuku 客户端声明：管理器经由该 Provider 下发 binder。
+             android:permission 防止普通应用随意触碰本声明。 -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+    </application>
+</manifest>

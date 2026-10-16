@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- FileProvider：分享搜索到的文件时使用 -->
+    <external-path name="shared_files" path="." />
+    <cache-path name="cache" path="." />
+    <!-- 崩溃日志（filesDir/crash/） -->
+    <files-path name="crash" path="crash/" />
+</paths>

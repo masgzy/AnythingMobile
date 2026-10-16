@@ -1,0 +1,156 @@
+<div align="center">
+
+# Anything
+
+**安卓本地文件毫秒级搜索 —— 文件名 + Office 文档全文检索**
+
+[![Release](https://img.shields.io/github/v/release/masgzy/AnythingMobile?include_prereleases&style=flat-square&label=%E6%9C%80%E6%96%B0%E7%89%88)](https://github.com/masgzy/AnythingMobile/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/masgzy/AnythingMobile/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/masgzy/AnythingMobile/actions/workflows/ci.yml)
+[![Stars](https://img.shields.io/github/stars/masgzy/AnythingMobile?style=flat-square&logo=github)](https://github.com/masgzy/AnythingMobile/stargazers)
+[![License](https://img.shields.io/github/license/masgzy/AnythingMobile?style=flat-square&label=%E8%AE%B8%E5%8F%AF%E8%AF%81)](LICENSE)
+
+![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat-square&logo=go&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-2.0-7F52FF?style=flat-square&logo=kotlin&logoColor=white)
+![Android](https://img.shields.io/badge/Android-7.0%2B%20%7C%20API%2024%2B-3DDC84?style=flat-square&logo=android&logoColor=white)
+![Material You](https://img.shields.io/badge/UI-Material%20You%20%28M3%29-6750A4?style=flat-square)
+
+致敬 Windows 平台的 [Everything](https://www.voidtools.com/)，安卓端开源实现。
+Go 高性能内核 × Kotlin Compose 原生外壳 · **完全离线 · 无广告 · 无追踪**
+
+</div>
+
+---
+
+## 它能做什么
+
+| 功能 | 说明 |
+|------|------|
+| 三页签搜索 | 文件名 / office 文档正文 / 目录名，与原版 Anything 一致 |
+| 文件名秒搜 | 2-gram 倒排索引，边输入边出结果 |
+| 文档全文搜索 | docx / xlsx / pptx / pdf 正文内容也能搜；旧版 .doc / .xls / .ppt / .wps 由内置解析器兜底 |
+| 持久化全文索引 | bleve + gse 中文分词的倒排索引落盘应用私有目录，启动秒级恢复，正文不再占用运行内存 |
+| 搜索语法 | `type:视频` 限定类别、`dir:Download` 限定目录、空格分隔多词（详见抽屉"搜索语法"） |
+| 自动更新索引 | 每次打开应用自动增量扫描，有变动才重解析，秒级完成；提示"更新索引中… / 索引更新完成" |
+| 类别快筛 | 底部圆钮一键筛选：视频 / 音乐 / 图片 / 文档；office 页可筛 Word / Excel / PPT |
+| 结果管理 | 点击看详情（位置/大小/时间）、直接打开或发送，长按多选批量删除 |
+| 外观设置 | 主题模式（跟随系统/浅色/深色）、动态取色开关、12 色主题色板、AMOLED 纯黑（对齐 ImageToolbox） |
+| 快捷磁贴 | 下拉通知栏点击磁贴，一键直达搜索 |
+| Android/data 扫描 | 借助 Shizuku / Stellar 特权通道收录应用数据目录（Android 11+ 隔离区）的文件名与目录名，设置内开关 + 授权按钮 |
+| 纯本地运行 | 无网络权限，索引数据不出设备 |
+
+## 下载安装
+
+**系统要求**：Android 7.0（API 24）及以上；已适配 Android 15 的 16KB 内存页设备。
+
+### 正式版（推荐）
+
+在 [Releases](https://github.com/masgzy/AnythingMobile/releases) 页面下载对应机型的 APK 安装
+（当前处于 alpha 阶段，功能快速迭代中）：
+
+| 文件 | 适合谁 |
+|------|--------|
+| `AnythingMobile-…-arm64-v8a.apk` | 2016 年后的绝大多数手机（推荐） |
+| `AnythingMobile-…-armeabi-v7a.apk` | 更早期的 32 位手机 |
+| `AnythingMobile-…-x86_64.apk` | 模拟器 / ChromeOS 设备 |
+| `AnythingMobile-…-universal.apk` | 不确定就选它，通吃所有机型（体积稍大） |
+
+> **升级提示**：v1.0.0-alpha12 起改用正式证书签名，此后可覆盖升级；
+> 从 alpha11 及更早版本升级需先卸载旧版。
+
+### 体验版（CI 构建）
+
+每一次代码提交都会自动构建最新版本：
+
+1. 前往 [Actions · Android CI](https://github.com/masgzy/AnythingMobile/actions/workflows/ci.yml)；
+2. 点开最新一次成功的运行，在页面底部 **Artifacts** 区域按需下载：
+
+   | 文件 | 适合谁 |
+   |------|--------|
+   | `AnythingMobile-…-arm64-v8a.apk` | 2016 年后的绝大多数手机（推荐） |
+   | `AnythingMobile-…-armeabi-v7a.apk` | 更早期的 32 位手机 |
+   | `AnythingMobile-…-x86_64.apk` | 模拟器 / ChromeOS 设备 |
+   | `AnythingMobile-…-universal.apk` | 不确定就选它，通吃所有机型（体积稍大） |
+
+3. 允许"安装未知来源应用"后安装。下载得到的就是 APK 本体，无需解压。
+
+## 三步上手
+
+1. **授权**：首次启动点击"去授权"，授予「所有文件访问」权限（全盘索引必需）；
+2. **等待首次索引**：首次启动自动建立索引（耗时取决于文件数量，通常几十秒），之后每次打开都会自动增量更新，无变动时秒级完成；
+3. **搜索**：输入关键词，文件名、目录名与文档全文实时命中，点击看详情，长按可多选删除。
+
+**可选：扫描 Android/data（应用数据目录）**
+
+Android 11+ 把 `/sdcard/Android/data` 对普通应用隔离，需借助特权框架：
+
+1. 安装并启动 [Shizuku](https://shizuku.rikka.app/download/) 或 [Stellar](https://github.com/roro2239/Stellar)（无线调试或 Root 启动均可）；
+2. 进入应用「设置 → 扩展扫描」，打开「扫描 Android/data 目录」；
+3. 点击「Shizuku / Stellar 授权」发起授权，成功后自动枚举并收录（仅文件名/目录名，不含全文；点击 Android/data 命中项会先导出副本再打开）。
+
+## 常见问题
+
+**为什么要"所有文件访问"权限？**
+全盘搜索必须读取每个文件的元数据与内容。本应用没有声明 INTERNET 权限
+（可在 AndroidManifest.xml 中验证，安装后也可在系统应用信息里查看权限列表），
+所有数据 100% 保留在你的设备上。系统云备份 / 设备迁移同样不会带走任何数据：
+应用已声明 `allowBackup=false`，索引快照与全文索引只存在于本机私有目录。
+
+**能搜索旧版 Office（.doc / .xls / .ppt）的内容吗？**
+能。应用内置了旧版二进制格式的解析器（无需任何额外权限与组件），
+.doc / .xls / .ppt / .wps 与新版 Office、PDF 一样参与全文搜索。
+个别加密或损坏文档解析失败时，其文件名仍可正常搜索。
+
+**会常驻后台耗电吗？**
+不会。只有你打开应用时才增量更新索引（仅扫描变动部分），平时没有任何后台活动。也可在设置中关闭自动更新。
+
+**搜索语法怎么用？**
+在搜索框中混用：`type:视频 家人` 只搜视频类文件、`dir:Download 合同`
+只搜 Download 目录下的文件、`年度 报告`（空格分隔）要求同时包含两个词。
+完整速查见应用抽屉菜单的"搜索语法"。
+
+**搜索结果是最新的吗？**
+进入应用时会自动增量扫描：新增、修改、删除的文件都会同步到索引，完成后会提示"索引更新完成"。
+需要说明：应用不常驻后台、不监听文件变动，因此**应用运行期间**外部新增或删除的文件
+不会实时出现——可在设置页点击"立即更新索引"手动同步，或下次进入应用时自动同步。
+
+## 路线图
+
+- [x] M1 骨架：Go 引擎 + Compose 外壳 + CI 自动构建
+- [x] M2 增量重扫：进入应用自动更新索引 + "索引更新完成"提示；目录名搜索；多选/详情/删除；外观设置（对齐 ImageToolbox）
+- [x] M2.5 旧版 Office：.doc / .xls / .ppt / .wps 正文解析下沉 Kotlin 层（alpha13）
+- [x] M3 bleve + gse 持久化全文索引 + PDF 文本抽取（alpha14）：正文落盘不占运行内存，升级旧快照自动重建全文
+- [x] M4 搜索语法 `type:` / `dir:` 过滤 + 全文命中相关性排序（alpha14）
+- [ ] 后续：体验打磨、F-Droid 分发、应用内删除 Android/data 文件（Shizuku）
+
+## 致谢
+
+- [voidtools Everything](https://www.voidtools.com/) —— 灵感来源；
+- **Anything**（SumStudio / SincereXIA 开发的闭源应用）—— 本仓库为致敬式开源重写，未使用其任何代码；
+- [ImageToolbox](https://github.com/T8RIN/ImageToolbox) —— Material You 界面设计参考；
+- [NPatch](https://github.com/7723mod/NPatch) —— 文件夹选择器（SAF 目录授权）设计与实现参考（GPL-3.0）；
+- [vivo Sans](https://developers.vivo.com/) —— 启动图标 "Anything" 字标使用 vivo 官方免费商用字体 vivo Sans（Global Heavy）字形轮廓；本仓库不分发字体文件本身，仅嵌入由其创作的图标作品。
+
+<details>
+<summary><b>开发者入口（架构 / 构建 / 依赖许可）</b></summary>
+
+- 架构设计与里程碑：[docs/architecture.md](docs/architecture.md)
+- 本地构建：
+
+  ```bash
+  ./build-aar.sh               # Go 引擎 -> AAR（含 Android 15 16KB 页对齐）
+  ./gradlew :app:assembleDebug # Gradle Wrapper 已入库（9.7.1），产出多 ABI + universal APK
+  ```
+
+- 核心依赖均为宽松许可证，与本项目 GPL-3.0 完全兼容：
+  gomobile (BSD-3) · bleve v2 (Apache-2.0) · gse (Apache-2.0) · ledongthuc/pdf (BSD-3) · godocx (MIT) · excelize (BSD-3)
+- 欢迎通过 Issue 与 PR 参与贡献；提交后 CI 自动完成引擎测试与全架构构建。
+
+</details>
+
+## 许可证
+
+本项目基于 [GPL-3.0](LICENSE) 协议开源：任何人在协议范围内自由使用、修改、再分发，衍生作品须以同协议开源。
+
+- 文件夹选择器（SAF 目录授权）的设计与实现参考了 [NPatch](https://github.com/7723mod/NPatch)（GPL-3.0），感谢其作者；
+- 依赖组件（gomobile / bleve / gse 等）均为 BSD / Apache / MIT 宽松许可证，与 GPL-3.0 兼容；
+- 本仓库为 Anything（SumStudio 闭源应用）的致敬式独立重写，未使用其任何代码。

@@ -1,0 +1,278 @@
+package core
+
+import (
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+)
+
+// NameIndex 基于 2-gram 倒排的名称索引（文件与目录通用，由 kind 区分）：
+//   - 查询词 >= 2 字符：先取各 bigram 倒排表求交集，再对候选做子串验证；
+//   - 单字符查询：退化为全量线性扫描（名称基数通常在十万级，可接受）。
+//
+// v0.2 增量扫描改造：
+//   - byPath 提供路径到文档的 O(1) 映射（原实现为 O(N) 全表扫描，
+//     全量索引十万文件时退化为 O(N^2)，是实测性能瓶颈）；
+//   - byPath 批量查重（LookupBatch）/ RemovePath / RemoveExcept
+//     支撑"进入应用自动增量重扫"。
+type NameIndex struct {
+	mu     sync.RWMutex
+	kind   string // "file" | "folder"，写入搜索结果的 Kind 字段
+	docs   map[uint32]*docInfo
+	byPath map[string]uint32
+	grams  map[string]map[uint32]struct{}
+	next   uint32
+}
+
+type docInfo struct {
+	path  string
+	name  string
+	lower string
+	size  int64
+	mtime int64
+}
+
+// NewNameIndex 创建空的名称索引；kind 取 "file" 或 "folder"。
+func NewNameIndex(kind string) *NameIndex {
+	return &NameIndex{
+		kind:   kind,
+		docs:   make(map[uint32]*docInfo),
+		byPath: make(map[string]uint32),
+		grams:  make(map[string]map[uint32]struct{}),
+	}
+}
+
+// Add 将一个名称加入索引；同路径重复加入会先移除旧记录（支持增量重扫）。
+func (n *NameIndex) Add(path string, size, mtime int64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.insertLocked(path, size, mtime)
+}
+
+// AddBatch 批量加入名称，语义与多次调用 Add 完全一致（同路径先删旧记录），
+// 但全程只获取一次写锁。扫描器按目录批量调用，把锁竞争开销摊薄一个数量级
+// （十万级文件全量建索引时，逐条 Add 的 8 协程锁竞争是实测热点）。
+func (n *NameIndex) AddBatch(items []nameRecord) {
+	if len(items) == 0 {
+		return
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, it := range items {
+		n.insertLocked(it.Path, it.Size, it.Mtime)
+	}
+}
+
+// insertLocked 插入一条记录（同路径先删旧记录）。调用方需持有写锁。
+func (n *NameIndex) insertLocked(path string, size, mtime int64) {
+	base := filepath.Base(path)
+	lower := strings.ToLower(base)
+	if lower == "" {
+		return
+	}
+
+	// 去重：同一路径先删旧 gram 记录（O(1) 定位）
+	if id, ok := n.byPath[path]; ok {
+		n.removeLocked(id)
+	}
+
+	id := n.next
+	n.next++
+	doc := &docInfo{path: path, name: base, lower: lower, size: size, mtime: mtime}
+	n.docs[id] = doc
+	n.byPath[path] = id
+	for _, g := range bigrams(lower) {
+		set := n.grams[g]
+		if set == nil {
+			set = make(map[uint32]struct{})
+			n.grams[g] = set
+		}
+		set[id] = struct{}{}
+	}
+}
+
+// LookupBatch 批量查询路径的 size/mtime（增量扫描的变更检测依据），
+// 全程只获取一次读锁。未命中的槽位 found[i]=false。
+func (n *NameIndex) LookupBatch(paths []string) (sizes, mtimes []int64, found []bool) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	sizes = make([]int64, len(paths))
+	mtimes = make([]int64, len(paths))
+	found = make([]bool, len(paths))
+	for i, p := range paths {
+		if id, ok := n.byPath[p]; ok {
+			d := n.docs[id]
+			sizes[i], mtimes[i], found[i] = d.size, d.mtime, true
+		}
+	}
+	return sizes, mtimes, found
+}
+
+// Count 返回已索引条目数。
+func (n *NameIndex) Count() int64 {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return int64(len(n.docs))
+}
+
+// RemovePath 从索引移除一个路径；返回是否存在。
+func (n *NameIndex) RemovePath(path string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	id, ok := n.byPath[path]
+	if !ok {
+		return false
+	}
+	n.removeLocked(id)
+	return true
+}
+
+// RemoveExcept 仅保留 seen 中的路径，其余全部移除（增量扫描的删除检测）。
+// 返回被移除的路径列表（供上层联动清理全文库）。
+func (n *NameIndex) RemoveExcept(seen map[string]struct{}) []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	var removed []string
+	for id, d := range n.docs {
+		if _, keep := seen[d.path]; keep {
+			continue
+		}
+		removed = append(removed, d.path)
+		n.removeLocked(id)
+	}
+	return removed
+}
+
+// Reset 清空索引（"重建索引"入口）。
+func (n *NameIndex) Reset() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.docs = make(map[uint32]*docInfo)
+	n.byPath = make(map[string]uint32)
+	n.grams = make(map[string]map[uint32]struct{})
+	n.next = 0
+}
+
+// Search 按子串查询名称，结果按"名称更短优先、修改时间更新优先"排序。
+func (n *NameIndex) Search(q string, limit int) []FileHit {
+	hits, _ := n.searchAll(q)
+	if limit <= 0 {
+		return nil
+	}
+	if len(hits) > limit {
+		hits = hits[:limit]
+	}
+	return hits
+}
+
+// searchAll 返回全部命中（已排序，不截断），便于调用方统计真实命中总数
+// 并按配额二次切片。名称索引内部本就是"全量收集→排序→截断"，
+// 这里只是去掉截断这一步，没有额外的遍历开销。
+func (n *NameIndex) searchAll(q string) ([]FileHit, int) {
+	ql := strings.ToLower(strings.TrimSpace(q))
+	if ql == "" {
+		return nil, 0
+	}
+
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	// bigram 倒排先收敛候选集，再对候选做精确子串校验。
+	candidates, ok := n.candidatesFor([]rune(ql))
+	if !ok {
+		return nil, 0 // 某个 bigram 无命中 => 不可能子串匹配
+	}
+
+	hits := make([]FileHit, 0, 32)
+	for id, doc := range n.docs {
+		if candidates != nil {
+			if _, ok := candidates[id]; !ok {
+				continue
+			}
+		}
+		if strings.Contains(doc.lower, ql) {
+			hits = append(hits, FileHit{
+				Path: doc.path, Name: doc.name,
+				Size: doc.size, ModTime: doc.mtime,
+				Matched: "name", Kind: n.kind,
+			})
+		}
+	}
+
+	sort.Slice(hits, func(i, j int) bool {
+		if len(hits[i].Name) != len(hits[j].Name) {
+			return len(hits[i].Name) < len(hits[j].Name)
+		}
+		return hits[i].ModTime > hits[j].ModTime
+	})
+	return hits, len(hits)
+}
+
+// candidatesFor 计算查询词全部 bigram 的倒排交集（调用方需持有读锁）。
+//
+// 返回值语义：
+//   - ok=false：某个 bigram 无倒排记录或交集为空 => 不可能子串命中；
+//   - ok=true 且 candidates=nil：单字符查询，无需候选过滤；
+//   - 其余：候选 id 集，扫描时只需遍历这些文档。
+func (n *NameIndex) candidatesFor(runes []rune) (candidates map[uint32]struct{}, ok bool) {
+	if len(runes) < 2 {
+		return nil, true
+	}
+	for i := 0; i+2 <= len(runes); i++ {
+		set := n.grams[string(runes[i:i+2])]
+		if len(set) == 0 {
+			return nil, false
+		}
+		if candidates == nil {
+			candidates = make(map[uint32]struct{}, len(set))
+			for id := range set {
+				candidates[id] = struct{}{}
+			}
+			continue
+		}
+		for id := range candidates {
+			if _, inSet := set[id]; !inSet {
+				delete(candidates, id)
+			}
+		}
+		if len(candidates) == 0 {
+			return nil, false
+		}
+	}
+	return candidates, true
+}
+
+// removeLocked 删除指定 id 的文档及其全部倒排记录。调用方需持有写锁。
+func (n *NameIndex) removeLocked(id uint32) {
+	doc, ok := n.docs[id]
+	if !ok {
+		return
+	}
+	for _, g := range bigrams(doc.lower) {
+		if set := n.grams[g]; set != nil {
+			delete(set, id)
+			if len(set) == 0 {
+				delete(n.grams, g)
+			}
+		}
+	}
+	delete(n.docs, id)
+	delete(n.byPath, doc.path)
+}
+
+// bigrams 生成 UTF-8 字符级 2-gram；单字符返回其自身，保证单字也能倒排。
+func bigrams(s string) []string {
+	r := []rune(s)
+	if len(r) == 0 {
+		return nil
+	}
+	if len(r) == 1 {
+		return []string{s}
+	}
+	out := make([]string, 0, len(r)-1)
+	for i := 0; i+2 <= len(r); i++ {
+		out = append(out, string(r[i:i+2]))
+	}
+	return out
+}

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Anything</string>
+    <string name="tile_label">Anything 搜索</string>
+    <string name="search_hint">输入关键词，搜索文件与文档全文</string>
+    <string name="grant_access">授予"所有文件访问"权限</string>
+    <string name="scan_now">开始扫描</string>
+    <string name="cancel_scan">取消扫描</string>
+    <string name="empty_result">无结果</string>
+</resources>
