@@ -28,3 +28,6 @@ signing/
 *.keystore
 app/libs/engine.aar
 app/libs/engine-sources.jar
+
+# Kotlin 编译会话临时文件
+.kotlin/

@@ -8,52 +8,67 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.masgzy.anything.crash.CrashReporter
 import com.masgzy.anything.ui.DirectoryScreen
 import com.masgzy.anything.ui.FloatingBottomBar
+import com.masgzy.anything.ui.LocalFloatingBarPadding
 import com.masgzy.anything.ui.SearchScreen
 import com.masgzy.anything.ui.SettingsScreen
 import com.masgzy.anything.ui.SyntaxHelpScreen
 import com.masgzy.anything.ui.WelcomeScreen
 import com.masgzy.anything.ui.theme.AnythingTheme
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 
 /**
  * 应用入口：主题（外观设置实时生效）+ 底栏三 tab（搜索/目录/设置）+ 首次引导页。
  *
- * 导航行为（alpha18）：三页 tab（搜索/目录/设置）+ 悬浮分页底栏（默认开，可改通栏）；
- * 旧侧边栏抽屉已移除——搜索语法教程入口在搜索顶栏 ? 与设置页「其他」分区，关于并入设置页；
+ * 导航行为（alpha19）：三页 tab 由 HorizontalPager 承载（NPatch MainScreen 同款）——
+ * 点击底栏平滑滚动切页，也支持手势横向滑动；子页面（语法教程）为栈式过渡
+ * （右侧滑入 / 反向滑出），打开时底栏随之下沉隐藏，返回键语义与栈一致；
  * 引导页仅在首启出现，完成后进入搜索 tab。
  *
  * 液态玻璃（NPatch FloatingGlassBottomBar 同款）：设置开启且 Android 13+ 时，
  * 内容层经 layerBackdrop 逐帧录制，底栏 LiquidGlass 模式采样折射；
- * 内容延伸到底栏之下（玻璃取样需要），滚动列表尾部用 contentPadding 预留。
+ * 内容延伸到底栏之下（玻璃取样需要），滚动列表尾部经
+ * [LocalFloatingBarPadding] 实测预留（照 NPatch 动态测量方案）。
  *
  * 自动索引更新：SearchScreen 内部在 ON_RESUME 调用 AppViewModel.autoScanIfNeed()。
  */
@@ -84,15 +99,33 @@ private fun Root(
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     AnythingTheme(settings = settings) {
-        // 首启引导后进入主壳；设置页「重看引导」可回跳
+        // 首启引导后进入主壳；设置页「重看引导」可回跳。
+        // 引导 ⇄ 主壳为栈式过渡（引导从下方推入，完成时向上收回），
+        // 替换原先 if/else 硬切的生硬跳变。
         var showWelcome by rememberSaveable { mutableStateOf(!settings.welcomeSeen) }
-        if (showWelcome) {
-            WelcomeScreen(onFinish = {
-                viewModel.markWelcomeSeen()
-                showWelcome = false
-            })
-        } else {
-            MainShell(viewModel, onRequestAllFiles, onShowWelcome = { showWelcome = true })
+        AnimatedContent(
+            targetState = showWelcome,
+            transitionSpec = {
+                if (targetState) {
+                    // push：引导页自下而上滑入
+                    (slideInVertically(tween(320)) { it } + fadeIn(tween(220))) togetherWith
+                        fadeOut(tween(160))
+                } else {
+                    // pop：引导页向上滑出，主壳淡入
+                    fadeIn(tween(220, delayMillis = 60)) togetherWith
+                        (slideOutVertically(tween(300)) { -it } + fadeOut(tween(160)))
+                }
+            },
+            label = "welcome",
+        ) { welcome ->
+            if (welcome) {
+                WelcomeScreen(onFinish = {
+                    viewModel.markWelcomeSeen()
+                    showWelcome = false
+                })
+            } else {
+                MainShell(viewModel, onRequestAllFiles, onShowWelcome = { showWelcome = true })
+            }
         }
     }
     // 上一次崩溃未分享的报告：启动时提示用户分享（崩溃页拉起失败时的兜底入口）
@@ -125,12 +158,13 @@ private fun Root(
 }
 
 /**
- * 主壳：三页 tab + 分页底栏 + 液态玻璃 backdrop 录制。
+ * 主壳：三页 HorizontalPager + 悬浮底栏 + 液态玻璃 backdrop 录制。
  *
  * 层次（与 NPatch MainScreen 同构）：
  *   Box(表面底色)
- *     ├─ 内容层：layerBackdrop(backdrop) 录制（玻璃取样源，含底色打底）
- *     └─ FloatingBottomBar(悬浮时叠在内容之上；通栏时在内容流内)
+ *     ├─ HorizontalPager(layerBackdrop(backdrop)) —— 玻璃取样源，含底色打底
+ *     ├─ 栈式子页面层（语法教程；出现时盖住 Pager，底栏同步隐藏）
+ *     └─ FloatingBottomBar(悬浮时叠内容之上；通栏时在内容流内)
  */
 @Composable
 private fun MainShell(
@@ -139,8 +173,14 @@ private fun MainShell(
     onShowWelcome: () -> Unit,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
     var showSyntaxHelp by rememberSaveable { mutableStateOf(false) }
+
+    // 底栏选中态跟随 settledPage（手势滑动时指示器同步，NPatch 同款）
+    val settledPage by remember(pagerState) {
+        derivedStateOf { pagerState.settledPage }
+    }
 
     // 液态玻璃门控：与 NPatch 一致，AGSL 折射 shader 需要 Android 13（Tiramisu）
     val glass = settings.liquidGlass &&
@@ -154,61 +194,89 @@ private fun MainShell(
         null
     }
 
-    // 返回语义：语法教程页优先关闭；否则目录/设置 tab 返回搜索 tab（与底栏语义一致）
-    BackHandler(enabled = tab != 0) { tab = 0 }
+    // —— 底栏占位实测（NPatch dynamicFloatingBottomBarPadding 同款）——
+    val density = LocalDensity.current
+    val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    var barPadding by remember { mutableStateOf(88.dp + navInset) }
+    val onBarHeight: (androidx.compose.ui.unit.Dp) -> Unit = { barPadding = it }
+
+    // 返回语义：教程页优先关闭；否则目录/设置 tab 平滑滚回搜索（与底栏语义一致）
+    BackHandler(enabled = settledPage != 0 && !showSyntaxHelp) {
+        scope.launch { pagerState.animateScrollToPage(0) }
+    }
     BackHandler(enabled = showSyntaxHelp) { showSyntaxHelp = false }
 
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(surface),
-    ) {
-        // —— 内容层（玻璃 backdrop 的录制源）——
+    // 底栏占位 padding 对整个壳生效（页面滚动尾部 contentPadding 消费它）
+    CompositionLocalProvider(LocalFloatingBarPadding provides barPadding) {
         Box(
             Modifier
                 .fillMaxSize()
-                .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
+                .background(surface),
         ) {
-            if (showSyntaxHelp) {
-                SyntaxHelpScreen(onBack = { showSyntaxHelp = false })
-            } else AnimatedContent(
-                targetState = tab,
-                transitionSpec = {
-                    // M3 fade-through：旧页 70ms 快速淡出，新页延迟后淡入并轻微放大
-                    fadeIn(
-                        tween(210, delayMillis = 70, easing = LinearOutSlowInEasing),
-                    ) + scaleIn(
-                        initialScale = 0.96f,
-                        animationSpec = tween(280, delayMillis = 70, easing = FastOutSlowInEasing),
-                    ) togetherWith fadeOut(tween(70, easing = FastOutSlowInEasing))
-                },
-                label = "tab",
-            ) { t ->
-                when (t) {
-                    1 -> DirectoryScreen(viewModel)
-                    2 -> SettingsScreen(
-                        viewModel = viewModel,
-                        onBack = { tab = 0 },
-                        onShowWelcome = onShowWelcome,
-                        onOpenSyntaxHelp = { showSyntaxHelp = true },
-                    )
-                    else -> SearchScreen(
-                        viewModel = viewModel,
-                        onRequestAllFiles = onRequestAllFiles,
-                        onOpenSyntaxHelp = { showSyntaxHelp = true },
-                    )
-                }
+        // —— 内容层（玻璃 backdrop 的录制源；教程页打开时底栏隐藏，Pager 仍在栈底）——
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier,
+                ),
+        ) { page ->
+            when (page) {
+                1 -> DirectoryScreen(viewModel)
+                2 -> SettingsScreen(
+                    viewModel = viewModel,
+                    onShowWelcome = onShowWelcome,
+                    onOpenSyntaxHelp = { showSyntaxHelp = true },
+                )
+                else -> SearchScreen(
+                    viewModel = viewModel,
+                    onRequestAllFiles = onRequestAllFiles,
+                    onOpenSyntaxHelp = { showSyntaxHelp = true },
+                )
             }
         }
 
-        // —— 分页底栏（悬浮时叠内容之上，玻璃实时取样内容层）——
-        FloatingBottomBar(
-            selected = tab,
-            onSelect = { tab = it },
-            floating = settings.showPaginator,
-            glass = glass,
-            backdrop = backdrop,
+        // —— 栈式子页面：语法教程（右侧滑入 / 反向滑出；盖住 Pager，底栏隐藏）——
+        AnimatedContent(
+            targetState = showSyntaxHelp,
+            transitionSpec = {
+                if (targetState) {
+                    (slideInHorizontally(tween(300)) { it } + fadeIn(tween(200))) togetherWith
+                        fadeOut(tween(150))
+                } else {
+                    fadeIn(tween(180, delayMillis = 40)) togetherWith
+                        (slideOutHorizontally(tween(280)) { it } + fadeOut(tween(180)))
+                }
+            },
+            label = "syntaxHelp",
+        ) { help ->
+            if (help) {
+                SyntaxHelpScreen(onBack = { showSyntaxHelp = false })
+            } else {
+                // 占位：不渲染任何内容（Pager 透出）
+                Box(Modifier.fillMaxSize())
+            }
+        }
+
+        // —— 底栏（教程页打开时下沉隐藏，NPatch 栈页同款语义）——
+        androidx.compose.animation.AnimatedVisibility(
+            visible = !showSyntaxHelp,
+            enter = fadeIn(tween(200)) + slideInVertically(tween(260)) { it / 2 },
+            exit = fadeOut(tween(180)) + slideOutVertically(tween(220)) { it / 2 },
             modifier = Modifier.align(Alignment.BottomCenter),
-        )
+        ) {
+            FloatingBottomBar(
+                selected = pagerState.currentPage,
+                onSelect = { index ->
+                    scope.launch { pagerState.animateScrollToPage(index) }
+                },
+                floating = settings.showPaginator,
+                glass = glass,
+                backdrop = backdrop,
+                onBarHeight = onBarHeight,
+            )
+        }
+        }
     }
 }

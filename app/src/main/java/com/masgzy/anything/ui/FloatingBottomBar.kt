@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Folder
@@ -58,7 +61,16 @@ val BOTTOM_BAR_ITEMS = listOf(
     BottomBarItem("设置", Icons.Rounded.Settings),
 )
 
-/** 悬浮底栏遮挡区高度（页面滚动列表的尾部 contentPadding）。 */
+/**
+ * 悬浮底栏的实时占位高度（含底部导航栏 inset 与呼吸空隙）。
+ * 照 NPatch MainScreen 的 LocalFloatingBottomBarPadding 机制：
+ * MainShell 实测底栏高度后 provide，各页面滚动内容的尾部
+ * contentPadding 消费它 —— 内容延伸到栏下（玻璃取样需要），
+ * 但滚动到底时最后几项不被遮挡。
+ */
+val LocalFloatingBarPadding = staticCompositionLocalOf { 88.dp }
+
+/** 兼容旧引用（无 CompositionLocal 环境时的保底值）。 */
 internal val FLOATING_BAR_CONTENT_PADDING = 88.dp
 
 /**
@@ -67,6 +79,7 @@ internal val FLOATING_BAR_CONTENT_PADDING = 88.dp
  * @param floating true=悬浮胶囊（NPatch 底栏）；false=通栏贴底
  * @param glass 液态玻璃（悬浮形态 + API 33+ 时生效；null backdrop 自动降级 None）
  * @param backdrop miuix-blur 页面层录制（glass=true 时由调用方提供）
+ * @param onBarHeight 实测总占位高度回调（含 inset 与呼吸空隙，供 LocalFloatingBarPadding）
  */
 @Composable
 fun FloatingBottomBar(
@@ -76,8 +89,10 @@ fun FloatingBottomBar(
     glass: Boolean,
     backdrop: Backdrop?,
     modifier: Modifier = Modifier,
+    onBarHeight: (androidx.compose.ui.unit.Dp) -> Unit = {},
 ) {
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val density = LocalDensity.current
 
     if (floating) {
         Box(
@@ -87,6 +102,14 @@ fun FloatingBottomBar(
             contentAlignment = Alignment.BottomCenter,
         ) {
             FloatingGlassBottomBar(
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    // NPatch 公式：栏高 + 12dp 下边距 + 8dp 呼吸 + 导航栏 inset
+                    .onSizeChanged {
+                        onBarHeight(
+                            with(density) { it.height.toDp() } + 12.dp + 8.dp + navInset,
+                        )
+                    },
                 items = BOTTOM_BAR_ITEMS,
                 selectedIndex = { selected },
                 onSelected = onSelect,
@@ -96,7 +119,6 @@ fun FloatingBottomBar(
                 } else {
                     FloatingBottomBarMode.None
                 },
-                modifier = Modifier.padding(horizontal = 12.dp),
                 iconContent = { item, index, previewSelected ->
                     FloatingGlassBottomBarIcon(
                         selected = previewSelected || index == selected,
@@ -116,7 +138,11 @@ fun FloatingBottomBar(
         // —— 通栏贴底（M3 风格自绘）——
         val cs = MaterialTheme.colorScheme
         Surface(
-            modifier = modifier.fillMaxWidth(),
+            modifier = modifier
+                .fillMaxWidth()
+                .onSizeChanged {
+                    onBarHeight(with(density) { it.height.toDp() } + 8.dp)
+                },
             color = cs.surfaceContainer,
             contentColor = cs.onSurface,
             tonalElevation = 0.dp,

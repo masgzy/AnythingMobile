@@ -15,6 +15,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,7 +32,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Help
 import androidx.compose.material.icons.rounded.Brightness6
 import androidx.compose.material.icons.rounded.Check
@@ -70,6 +71,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -97,19 +99,17 @@ import com.masgzy.anything.ui.theme.ColorTupleDefaults
 import com.masgzy.anything.ui.theme.PaletteStyle
 
 /**
- * 设置页 —— 视觉对齐 ImageToolbox：每个设置项都是独立圆角卡片
- * （20dp 圆角、高表面色容器、左侧图标 + 标题/副标题 + 右侧控件）。
+ * 设置页 —— NPatch 分组连块样式：分组小标题 + 圆角大卡片，
+ * 卡片内多个设置项连排（项与项之间细分割线，对齐 NPatch/MIUI 设置观感）。
  *
- * 外观面板：主题模式三态、动态取色（Monet）、配色方案
- * （ImageToolbox 式角色化调色板：主色/辅助色/第三色/表面/中性变体/错误
- * 逐一编辑，附"简单变体"预设），AMOLED 纯黑；
- * 功能面板：自动更新索引、立即更新索引、重建索引、结果排序、欢迎页。
+ * 作为底栏 tab 页无返回键（alpha19）；外观面板：主题模式三态、动态取色（Monet）、
+ * 配色方案（ImageToolbox 式角色化调色板）、AMOLED 纯黑、底栏形态；
+ * 功能面板：索引、扩展扫描（Shizuku/Stellar）、结果、其他。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     viewModel: AppViewModel,
-    onBack: () -> Unit,
     onShowWelcome: () -> Unit,
     onOpenSyntaxHelp: () -> Unit,
 ) {
@@ -141,15 +141,9 @@ fun SettingsScreen(
         topBar = {
             TopAppBar(
                 title = { Text("设置") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回")
-                    }
-                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
                 ),
             )
         },
@@ -159,237 +153,245 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(horizontal = 12.dp)
+                .padding(top = 4.dp, bottom = 24.dp)
+                // 悬浮底栏实测占位（NPatch LocalFloatingBottomBarPadding 同款）：
+                // 尾部内容滚动到底时不被底栏遮挡
+                .padding(bottom = LocalFloatingBarPadding.current),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             // ---- 外观 ----
             SectionHeader("外观")
-
-            PreferenceCard(
-                icon = Icons.Rounded.Brightness6,
-                title = "主题模式",
-                subtitle = modeLabel,
-                onClick = { showThemeModeDialog = true },
-            )
-
-            if (monetAvailable) {
-                PreferenceCard(
-                    icon = Icons.Rounded.Wallpaper,
-                    title = "动态取色",
-                    subtitle = "如果启用，应用颜色将更改为壁纸颜色",
+            GroupCard {
+                PreferenceItem(
+                    icon = Icons.Rounded.Brightness6,
+                    title = "主题模式",
+                    subtitle = modeLabel,
+                    onClick = { showThemeModeDialog = true },
+                )
+                GroupDivider()
+                if (monetAvailable) {
+                    PreferenceItem(
+                        icon = Icons.Rounded.Wallpaper,
+                        title = "动态取色",
+                        subtitle = "如果启用，应用颜色将更改为壁纸颜色",
+                        trailing = {
+                            Switch(
+                                checked = settings.dynamicColor,
+                                onCheckedChange = {
+                                    viewModel.updateSettings { s -> s.copy(dynamicColor = it) }
+                                },
+                            )
+                        },
+                    )
+                    GroupDivider()
+                }
+                PreferenceItem(
+                    icon = Icons.Rounded.Palette,
+                    title = "配色方案",
+                    subtitle = paletteSubtitle(settings, monetAvailable),
+                    onClick = { showPaletteSheet = true },
+                    leading = {
+                        // 当前主色预览圆点
+                        Box(
+                            Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Color(settings.roleColors.primary))
+                                .border(
+                                    width = 2.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant,
+                                    shape = CircleShape,
+                                ),
+                        )
+                    },
+                )
+                GroupDivider()
+                PreferenceItem(
+                    icon = Icons.Rounded.Tonality,
+                    title = "Amoled模式",
+                    subtitle = "如果启用，在夜间模式下背景色将设为纯黑",
                     trailing = {
                         Switch(
-                            checked = settings.dynamicColor,
+                            checked = settings.amoled,
                             onCheckedChange = {
-                                viewModel.updateSettings { s -> s.copy(dynamicColor = it) }
+                                viewModel.updateSettings { s -> s.copy(amoled = it) }
                             },
+                        )
+                    },
+                )
+                GroupDivider()
+                PreferenceItem(
+                    icon = Icons.Rounded.SpaceDashboard,
+                    title = "悬浮分页底栏",
+                    subtitle = "底部悬浮胶囊式页签（搜索/目录/设置），默认开启；" +
+                        "关闭后改为通栏底栏",
+                    trailing = {
+                        Switch(
+                            checked = settings.showPaginator,
+                            onCheckedChange = { viewModel.setShowPaginator(it) },
+                        )
+                    },
+                )
+                GroupDivider()
+                PreferenceItem(
+                    icon = Icons.Rounded.LensBlur,
+                    title = "液态玻璃底栏",
+                    subtitle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        "底栏玻璃质感：背景模糊 + 折射高光（NPatch 同款实现）"
+                    } else {
+                        "需要 Android 13 及以上版本"
+                    },
+                    enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
+                    trailing = {
+                        Switch(
+                            checked = settings.liquidGlass,
+                            onCheckedChange = { viewModel.setLiquidGlass(it) },
                         )
                     },
                 )
             }
 
-            PreferenceCard(
-                icon = Icons.Rounded.Palette,
-                title = "配色方案",
-                subtitle = paletteSubtitle(settings, monetAvailable),
-                onClick = { showPaletteSheet = true },
-                leading = {
-                    // 当前主色预览圆点
-                    Box(
-                        Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(Color(settings.roleColors.primary))
-                            .border(
-                                width = 2.dp,
-                                color = MaterialTheme.colorScheme.outlineVariant,
-                                shape = CircleShape,
-                            ),
-                    )
-                },
-            )
-
-            PreferenceCard(
-                icon = Icons.Rounded.Tonality,
-                title = "Amoled模式",
-                subtitle = "如果启用，在夜间模式下背景色将设为纯黑",
-                trailing = {
-                    Switch(
-                        checked = settings.amoled,
-                        onCheckedChange = {
-                            viewModel.updateSettings { s -> s.copy(amoled = it) }
-                        },
-                    )
-                },
-            )
-
-            PreferenceCard(
-                icon = Icons.Rounded.SpaceDashboard,
-                title = "悬浮分页底栏",
-                subtitle = "底部悬浮胶囊式页签（搜索/目录/设置），默认开启；" +
-                    "关闭后改为通栏底栏",
-                trailing = {
-                    Switch(
-                        checked = settings.showPaginator,
-                        onCheckedChange = { viewModel.setShowPaginator(it) },
-                    )
-                },
-            )
-
-            PreferenceCard(
-                icon = Icons.Rounded.LensBlur,
-                title = "液态玻璃底栏",
-                subtitle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    "底栏玻璃质感：背景模糊 + 折射高光（NPatch 同款实现）"
-                } else {
-                    "需要 Android 13 及以上版本"
-                },
-                enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
-                trailing = {
-                    Switch(
-                        checked = settings.liquidGlass,
-                        onCheckedChange = { viewModel.setLiquidGlass(it) },
-                    )
-                },
-            )
-
             // ---- 索引 ----
             SectionHeader("索引")
-
-            PreferenceCard(
-                icon = Icons.Rounded.Sync,
-                title = "进入应用时自动更新索引",
-                subtitle = "增量扫描，仅处理有变动的文件",
-                trailing = {
-                    Switch(
-                        checked = settings.autoScanOnEnter,
-                        onCheckedChange = {
-                            viewModel.updateSettings { s -> s.copy(autoScanOnEnter = it) }
-                        },
-                    )
-                },
-            )
-
-            PreferenceCard(
-                icon = Icons.Rounded.Sync,
-                title = "立即更新索引",
-                subtitle = if (scanning) repoState.statusText else "增量检查文件变动",
-                enabled = !scanning && repoState.ready,
-                onClick = { viewModel.startScan(incremental = true) },
-            )
-
-            PreferenceCard(
-                icon = Icons.Rounded.RestartAlt,
-                title = "重建索引",
-                subtitle = if (scanning) repoState.statusText
-                else "清空后重新扫描全部文件，耗时较长",
-                enabled = !scanning && repoState.ready,
-                onClick = { viewModel.startScan(incremental = false) },
-            )
-
-            PreferenceCard(
-                icon = Icons.Rounded.Folder,
-                title = "仅搜索选定目录",
-                subtitle = "开启后索引只覆盖「目录」页授权的目录；" +
-                    "关闭则全盘扫描",
-                trailing = {
-                    Switch(
-                        checked = settings.scopedSearchOnly,
-                        onCheckedChange = { viewModel.setScopedSearchOnly(it) },
-                    )
-                },
-            )
+            GroupCard {
+                PreferenceItem(
+                    icon = Icons.Rounded.Sync,
+                    title = "进入应用时自动更新索引",
+                    subtitle = "增量扫描，仅处理有变动的文件",
+                    trailing = {
+                        Switch(
+                            checked = settings.autoScanOnEnter,
+                            onCheckedChange = {
+                                viewModel.updateSettings { s -> s.copy(autoScanOnEnter = it) }
+                            },
+                        )
+                    },
+                )
+                GroupDivider()
+                PreferenceItem(
+                    icon = Icons.Rounded.Sync,
+                    title = "立即更新索引",
+                    subtitle = if (scanning) repoState.statusText else "增量检查文件变动",
+                    enabled = !scanning && repoState.ready,
+                    onClick = { viewModel.startScan(incremental = true) },
+                )
+                GroupDivider()
+                PreferenceItem(
+                    icon = Icons.Rounded.RestartAlt,
+                    title = "重建索引",
+                    subtitle = if (scanning) repoState.statusText
+                    else "清空后重新扫描全部文件，耗时较长",
+                    enabled = !scanning && repoState.ready,
+                    onClick = { viewModel.startScan(incremental = false) },
+                )
+                GroupDivider()
+                PreferenceItem(
+                    icon = Icons.Rounded.Folder,
+                    title = "仅搜索选定目录",
+                    subtitle = "开启后索引只覆盖「目录」页授权的目录；" +
+                        "关闭则全盘扫描",
+                    trailing = {
+                        Switch(
+                            checked = settings.scopedSearchOnly,
+                            onCheckedChange = { viewModel.setScopedSearchOnly(it) },
+                        )
+                    },
+                )
+            }
 
             // ---- 扩展扫描（Shizuku / Stellar） ----
             SectionHeader("扩展扫描")
-
-            PreferenceCard(
-                icon = Icons.Rounded.FolderSpecial,
-                title = "扫描 Android/data 目录",
-                subtitle = "借助 Shizuku / Stellar 特权收录应用数据目录的文件名" +
-                    "（不含全文内容；Android/data 在 Android 11+ 对普通应用隔离）",
-                trailing = {
-                    Switch(
-                        checked = settings.scanAndroidData,
-                        onCheckedChange = { viewModel.setAndroidDataEnabled(it) },
-                    )
-                },
-            )
-
-            PreferenceCard(
-                icon = Icons.Rounded.Key,
-                title = "Shizuku / Stellar 授权",
-                subtitle = when (shizukuState.status) {
-                    ShizukuAccess.Status.NOT_RUNNING ->
-                        "未检测到服务 —— 请先安装并启动 Shizuku 或 Stellar，点击前往下载"
-                    ShizukuAccess.Status.NEED_PERMISSION ->
-                        "服务已就绪 · 点击发起授权请求"
-                    ShizukuAccess.Status.GRANTED ->
-                        "已授权 · 已收录 $externalCount 项 Android/data 条目"
-                },
-                onClick = {
-                    when (shizukuState.status) {
-                        ShizukuAccess.Status.NOT_RUNNING -> viewModel.openShizukuDownload()
-                        else -> viewModel.requestShizukuPermission()
-                    }
-                },
-            )
-
-            PreferenceCard(
-                icon = Icons.Rounded.DeleteSweep,
-                title = "清理特权导出缓存",
-                subtitle = when {
-                    privCacheBytes < 0 -> "打开 Android/data 文件时产生的临时副本"
-                    privCacheBytes == 0L -> "暂无占用 · 打开 Android/data 文件时会产生临时副本"
-                    else -> "当前占用 " + formatBytes(privCacheBytes) + " · 点击释放"
-                },
-                enabled = privCacheBytes > 0,
-                onClick = { viewModel.clearPrivilegedCache() },
-            )
+            GroupCard {
+                PreferenceItem(
+                    icon = Icons.Rounded.FolderSpecial,
+                    title = "扫描 Android/data 目录",
+                    subtitle = "借助 Shizuku / Stellar 特权收录应用数据目录的文件名" +
+                        "（不含全文内容；Android/data 在 Android 11+ 对普通应用隔离）",
+                    trailing = {
+                        Switch(
+                            checked = settings.scanAndroidData,
+                            onCheckedChange = { viewModel.setAndroidDataEnabled(it) },
+                        )
+                    },
+                )
+                GroupDivider()
+                PreferenceItem(
+                    icon = Icons.Rounded.Key,
+                    title = "Shizuku / Stellar 授权",
+                    subtitle = when (shizukuState.status) {
+                        ShizukuAccess.Status.NOT_RUNNING ->
+                            "未检测到服务 —— 请先安装并启动 Shizuku 或 Stellar，点击前往下载"
+                        ShizukuAccess.Status.NEED_PERMISSION ->
+                            "服务已就绪 · 点击发起授权请求"
+                        ShizukuAccess.Status.GRANTED ->
+                            "已授权 · 已收录 $externalCount 项 Android/data 条目"
+                    },
+                    onClick = {
+                        when (shizukuState.status) {
+                            ShizukuAccess.Status.NOT_RUNNING -> viewModel.openShizukuDownload()
+                            else -> viewModel.requestShizukuPermission()
+                        }
+                    },
+                )
+                GroupDivider()
+                PreferenceItem(
+                    icon = Icons.Rounded.DeleteSweep,
+                    title = "清理特权导出缓存",
+                    subtitle = when {
+                        privCacheBytes < 0 -> "打开 Android/data 文件时产生的临时副本"
+                        privCacheBytes == 0L -> "暂无占用 · 打开 Android/data 文件时会产生临时副本"
+                        else -> "当前占用 " + formatBytes(privCacheBytes) + " · 点击释放"
+                    },
+                    enabled = privCacheBytes > 0,
+                    onClick = { viewModel.clearPrivilegedCache() },
+                )
+            }
 
             // ---- 结果 ----
             SectionHeader("结果")
-
-            PreferenceCard(
-                icon = Icons.Rounded.SortByAlpha,
-                title = "排序方式",
-                subtitle = sortLabel,
-                onClick = { showSortDialog = true },
-            )
-
-            PreferenceCard(
-                icon = Icons.Rounded.Label,
-                title = "筛选文字显示时长",
-                subtitle = "点击「所有」后类别文字的停留时间 · " + filterLabelLabel(settings.filterLabelSeconds),
-                onClick = { showFilterLabelDialog = true },
-            )
+            GroupCard {
+                PreferenceItem(
+                    icon = Icons.Rounded.SortByAlpha,
+                    title = "排序方式",
+                    subtitle = sortLabel,
+                    onClick = { showSortDialog = true },
+                )
+                GroupDivider()
+                PreferenceItem(
+                    icon = Icons.Rounded.Label,
+                    title = "筛选文字显示时长",
+                    subtitle = "点击「所有」后类别文字的停留时间 · " + filterLabelLabel(settings.filterLabelSeconds),
+                    onClick = { showFilterLabelDialog = true },
+                )
+            }
 
             // ---- 其他 ----
             SectionHeader("其他")
-
-            PreferenceCard(
-                icon = Icons.AutoMirrored.Rounded.Help,
-                title = "搜索语法教程",
-                subtitle = "type: / dir: / 短语匹配的完整用法",
-                onClick = onOpenSyntaxHelp,
-            )
-
-            PreferenceCard(
-                icon = Icons.Rounded.WbTwilight,
-                title = "重新查看欢迎页",
-                subtitle = "了解 Anything 的核心功能",
-                onClick = {
-                    viewModel.markWelcomeSeen()
-                    onShowWelcome()
-                },
-            )
-
-            PreferenceCard(
-                icon = Icons.Rounded.Info,
-                title = "版本",
-                subtitle = "${BuildConfig.VERSION_NAME} · GPL-3.0",
-            )
+            GroupCard {
+                PreferenceItem(
+                    icon = Icons.AutoMirrored.Rounded.Help,
+                    title = "搜索语法教程",
+                    subtitle = "type: / dir: / 短语匹配的完整用法",
+                    onClick = onOpenSyntaxHelp,
+                )
+                GroupDivider()
+                PreferenceItem(
+                    icon = Icons.Rounded.WbTwilight,
+                    title = "重新查看欢迎页",
+                    subtitle = "了解 Anything 的核心功能",
+                    onClick = {
+                        viewModel.markWelcomeSeen()
+                        onShowWelcome()
+                    },
+                )
+                GroupDivider()
+                PreferenceItem(
+                    icon = Icons.Rounded.Info,
+                    title = "版本",
+                    subtitle = "${BuildConfig.VERSION_NAME} · GPL-3.0",
+                )
+            }
 
             // ---- 关于 ----
             SectionHeader("关于")
@@ -553,27 +555,51 @@ private fun styleLabel(style: PaletteStyle): String = when (style) {
     PaletteStyle.Content -> "内容"
 }
 
-// ---- 通用组件 ----
+// ---- 通用组件（NPatch 分组连块样式） ----
 
-/** 分组小标题。 */
+/** 分组小标题（NPatch SmallTitle 观感：主色、字重、卡片上方呼吸感）。 */
 @Composable
 private fun SectionHeader(text: String) {
     Text(
         text,
-        style = MaterialTheme.typography.labelLarge,
+        style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.padding(start = 6.dp, top = 4.dp),
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(start = 8.dp, top = 2.dp),
     )
 }
 
 /**
- * ImageToolbox 式设置项卡片：
- * 20dp 圆角、高表面色容器，左侧图标（可选自定义 leading，
- * 如配色方案卡片的色块预览），中间标题/副标题，右侧控件。
+ * 分组连块卡片（NPatch Card 同构）：一张圆角卡内连排多个设置项，
+ * 项与项之间由 [GroupDivider] 画缩进细线 —— 替代旧版每项一张独立卡片的散排。
  */
 @Composable
-private fun PreferenceCard(
+private fun GroupCard(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(content = content)
+    }
+}
+
+/** 连块内分割线：左端缩进到文字列（图标右侧），NPatch/MIUI 设置同款。 */
+@Composable
+private fun GroupDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 68.dp),
+        thickness = 0.5.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+    )
+}
+
+/**
+ * 分组内单个设置项：左侧图标（可选自定义 leading），中间标题/副标题，右侧控件。
+ * 与旧 [PreferenceCard] 的差别：无独立圆角容器与外边距，由 GroupCard 统一承载。
+ */
+@Composable
+private fun PreferenceItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     subtitle: String,
@@ -583,58 +609,52 @@ private fun PreferenceCard(
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
-    val shape = RoundedCornerShape(20.dp)
     val clickMod = onClick?.let { o ->
         Modifier.clickable(enabled = enabled) { o() }
     } ?: Modifier
     val contentAlpha = if (enabled) 1f else 0.5f
 
-    Surface(
-        shape = shape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = modifier
+    Row(
+        modifier
             .fillMaxWidth()
-            .clip(shape)
-            .then(clickMod),
+            .height(IntrinsicSize.Min)
+            .then(clickMod)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
+            Modifier
+                .size(40.dp)
+                .alpha(contentAlpha),
+            contentAlignment = Alignment.Center,
         ) {
-            Box(
-                Modifier
-                    .size(40.dp)
-                    .alpha(contentAlpha),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (leading != null) {
-                    leading()
-                } else {
-                    Icon(
-                        icon,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp),
-                    )
-                }
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.alpha(contentAlpha),
-                )
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.alpha(contentAlpha),
+            if (leading != null) {
+                leading()
+            } else {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp),
                 )
             }
-            trailing?.invoke()
         }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.alpha(contentAlpha),
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.alpha(contentAlpha),
+            )
+        }
+        trailing?.invoke()
     }
 }
 

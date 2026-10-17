@@ -57,8 +57,11 @@ command -v gobind >/dev/null 2>&1 || {
 }
 (cd core && go get golang.org/x/mobile/cmd/gomobile@latest)
 
-# ---- 编译 AAR（含 16KB 页对齐链接参数） ----
+# ---- 编译 AAR（含 16KB 页对齐链接参数 + 符号裁剪） ----
 # 注意：bind 必须在 Go 模块目录（core/）内执行
+# -s -w：去除符号表与 DWARF 调试信息（libgojni.so 缩减 ~30%，
+#   alpha18 arm64 17.1MB → alpha19 约 11-12MB；发布包无需调试符号，
+#   崩溃回溯由宿主 Kotlin 栈负责，Go 侧 panic 已在 EngineRepository 兜底转译）
 mkdir -p app/libs
 (
   cd core
@@ -66,7 +69,7 @@ mkdir -p app/libs
     -target=android \
     -androidapi 24 \
     -javapkg=com.masgzy.anything \
-    -ldflags='-extldflags=-Wl,-z,max-page-size=16384' \
+    -ldflags='-s -w -extldflags=-Wl,-z,max-page-size=16384' \
     -o ../app/libs/engine.aar \
     .
 )

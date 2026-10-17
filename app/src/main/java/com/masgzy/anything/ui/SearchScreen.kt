@@ -16,6 +16,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,6 +29,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Help
@@ -210,14 +212,13 @@ fun SearchScreen(
 
                     PrimaryTabRow(
                         selectedTabIndex = pagerState.currentPage,
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        // 原版 Anything 为 TabLayout 全宽白色下划线指示条，
-                        // 对应 M3 SecondaryIndicator + tabIndicatorOffset(全 Tab 宽)
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        // M3 色彩体系：surface 顶栏 + primary 指示条（alpha19 不再用 primary 大色块顶栏）
                         indicator = {
                             TabRowDefaults.SecondaryIndicator(
                                 modifier = Modifier.tabIndicatorOffset(pagerState.currentPage),
-                                color = MaterialTheme.colorScheme.onPrimary,
+                                color = MaterialTheme.colorScheme.primary,
                             )
                         },
                     ) {
@@ -230,13 +231,17 @@ fun SearchScreen(
                         }
                     }
 
-                    // 索引状态横条（原版同款）：布局流内推挤内容，非悬浮层
+                    // 索引状态横条（原版同款）：布局流内推挤内容，非悬浮层；
+                    // 扫描中附带不确定进度条（alpha19）
                     androidx.compose.animation.AnimatedVisibility(
                         visible = stripText != null,
                         enter = fadeIn(tween(180)) + expandVertically(tween(200)),
                         exit = fadeOut(tween(220)) + shrinkVertically(tween(240)),
                     ) {
-                        IndexStatusStrip(stripText.orEmpty())
+                        IndexStatusStrip(
+                            text = stripText.orEmpty(),
+                            scanning = repoState.phase == ScanPhase.UPDATING,
+                        )
                     }
 
                     HorizontalPager(state = pagerState, modifier = Modifier.weight(1f)) { page ->
@@ -267,7 +272,8 @@ fun SearchScreen(
 
                 // 索引状态走 Tab 行下方的原版同款横幅（见 IndexStatusStrip），无悬浮胶囊/Snackbar
 
-                // 底部筛选区（目录名页不显示，还原原版）
+                // 底部筛选区（目录名页不显示，还原原版）；
+                // 抬高到悬浮底栏之上（alpha19：实测占位 LocalFloatingBarPadding）
                 if (pagerState.currentPage != 2 && repoState.phase != ScanPhase.FIRST_BUILD) {
                     FilterPanel(
                         page = pagerState.currentPage,
@@ -277,7 +283,9 @@ fun SearchScreen(
                         onSelect = { c ->
                             if (pagerState.currentPage == 0) nameFilter = c else officeFilter = c
                         },
-                        modifier = Modifier.align(Alignment.BottomCenter),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = LocalFloatingBarPadding.current),
                         labelSeconds = settings.filterLabelSeconds,
                         sortLabel = if (settings.sortByName) "已按名称排序" else "已按时间排序",
                         onToggleSort = {
@@ -377,7 +385,11 @@ private fun HitListPage(
             if (page == 1) "请输入查找关键字" else "请在上方搜索栏中输入搜索内容"
         )
         visible.isEmpty() -> EmptyHint("未找到匹配结果")
-        else -> LazyColumn(Modifier.fillMaxSize()) {
+        else -> LazyColumn(
+            Modifier.fillMaxSize(),
+            // 悬浮底栏实测占位：滚动到底时最后几条不被遮挡（alpha19）
+            contentPadding = PaddingValues(bottom = LocalFloatingBarPadding.current),
+        ) {
             item(key = "header-$page") {
                 val header = when (page) {
                     0 -> "文件名中包含 \"$query\" 的文件有"
@@ -525,7 +537,11 @@ private fun FilterPanel(
     }
 }
 
-/** 普通态顶栏：放大镜 + 搜索输入 + 语法教程入口（M3 配色）。 */
+/**
+ * 普通态顶栏（alpha19 Material You 化）：
+ * surface 底 + M3 搜索胶囊（surfaceContainerHigh、28dp 圆角）内嵌输入框，
+ * 右侧 ？ 教程图标 —— 替代旧版 primary 大色块顶栏（与全页 M3 色板割裂）。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SearchTopBar(
@@ -533,44 +549,72 @@ private fun SearchTopBar(
     onQueryChange: (String) -> Unit,
     onOpenSyntaxHelp: () -> Unit,
 ) {
+    val cs = MaterialTheme.colorScheme
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primary,
-            titleContentColor = MaterialTheme.colorScheme.onPrimary,
-            actionIconContentColor = MaterialTheme.colorScheme.onPrimary,
+            containerColor = cs.surface,
+            titleContentColor = cs.onSurface,
+            actionIconContentColor = cs.onSurfaceVariant,
         ),
+        title = {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = cs.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Rounded.Search,
+                        null,
+                        Modifier.size(20.dp),
+                        tint = cs.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    BasicTextField(
+                        value = query,
+                        onValueChange = onQueryChange,
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            color = cs.onSurface,
+                            fontSize = 16.sp,
+                        ),
+                        cursorBrush = SolidColor(cs.primary),
+                        decorationBox = { inner ->
+                            Box {
+                                if (query.isEmpty()) {
+                                    Text(
+                                        "请输入查询关键词",
+                                        color = cs.onSurfaceVariant.copy(alpha = 0.7f),
+                                        fontSize = 16.sp,
+                                    )
+                                }
+                                inner()
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (query.isNotEmpty()) {
+                        IconButton(
+                            onClick = { onQueryChange("") },
+                            modifier = Modifier.size(28.dp),
+                        ) {
+                            Icon(
+                                Icons.Rounded.Close,
+                                "清空",
+                                Modifier.size(18.dp),
+                                tint = cs.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        },
         actions = {
             IconButton(onClick = onOpenSyntaxHelp) {
                 Icon(Icons.AutoMirrored.Rounded.Help, "搜索语法教程")
-            }
-        },
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Search, null, modifier = Modifier.size(22.dp))
-                Spacer(Modifier.width(10.dp))
-                BasicTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    singleLine = true,
-                    textStyle = TextStyle(
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        fontSize = 17.sp,
-                    ),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.onPrimary),
-                    decorationBox = { inner ->
-                        Box {
-                            if (query.isEmpty()) {
-                                Text(
-                                    "请输入查询关键词",
-                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f),
-                                    fontSize = 17.sp,
-                                )
-                            }
-                            inner()
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
             }
         },
     )
@@ -648,26 +692,37 @@ private fun PermissionCard(onRequest: () -> Unit, onAppDetails: () -> Unit) {
 /**
  * 索引状态横条（原版同款）：页签行下方的全宽浅黄横幅，融入顶部 UI 布局流，
  * 推挤内容而非悬浮；配色取自原版实测（底 #FFFDE8 / 字 #ECB763 采自原版截图），
- * 深色主题下换深底亮字避免刺眼。
+ * 深色主题下换深底亮字避免刺眼；扫描中底部附 2dp 不确定进度细条（alpha19）。
  */
 @Composable
-private fun IndexStatusStrip(text: String) {
+private fun IndexStatusStrip(text: String, scanning: Boolean) {
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     Surface(
         color = if (dark) Color(0xFF32301F) else Color(0xFFFFFDE8),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(42.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (dark) Color(0xFFF2C368) else Color(0xFFE6AC4E),
-            )
+        Column {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(42.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (dark) Color(0xFFF2C368) else Color(0xFFE6AC4E),
+                )
+            }
+            if (scanning) {
+                LinearProgressIndicator(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(2.dp),
+                    color = if (dark) Color(0xFFF2C368) else Color(0xFFE6AC4E),
+                    trackColor = Color.Transparent,
+                )
+            }
         }
     }
 }

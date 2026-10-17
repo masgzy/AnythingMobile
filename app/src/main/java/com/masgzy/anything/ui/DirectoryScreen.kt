@@ -4,8 +4,10 @@ import android.content.Intent
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,24 +16,29 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderOff
-import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.HelpOutline
+import androidx.compose.material.icons.rounded.ManageSearch
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -55,7 +62,18 @@ import com.masgzy.anything.data.SafDirs
 import com.masgzy.anything.data.ScanPhase
 
 /**
- * 「目录」tab —— SAF 文件夹选择器授权的搜索目录管理。
+ * 「目录」tab —— SAF 文件夹选择器授权的搜索目录管理（alpha19 重设计）。
+ *
+ * 相比 alpha18 的变化：
+ *  - 顶部新增「怎么用」三步引导卡（添加目录 → 同步索引 → 去搜索），
+ *    解决"看不懂这个功能咋用"的问题；
+ *  - 「添加目录」从悬浮 FAB 改为内容流内的引导卡按钮 + 空态大按钮，
+ *    消除 FAB 被悬浮底栏遮挡的问题；
+ *  - 同步/重建期间显示实况进度卡（indeterminate 进度条 + 已收录计数
+ *    + 状态文本 + 取消按钮）——引擎按文件计数回报进度，总数未知故为
+ *    不确定式进度条；
+ *  - 列表与说明改为 NPatch 分组连块卡片；滚动尾部消费
+ *    [LocalFloatingBarPadding]（NPatch 动态占位方案）。
  *
  * 数据流参照 NPatch 的授权闭环（GPL-3.0，README 致谢）：
  * 裸 ACTION_OPEN_DOCUMENT_TREE 选择 → 回调里 takePersistableUriPermission
@@ -74,6 +92,7 @@ fun DirectoryScreen(
     val context = LocalContext.current
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val repoState by viewModel.repo.state.collectAsStateWithLifecycle()
+    val scanning = repoState.phase != ScanPhase.IDLE
 
     val pickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -87,89 +106,121 @@ fun DirectoryScreen(
             viewModel.addSearchDir(uri.toString())
         }
     }
+    val launchPicker = {
+        // 裸 Intent（NPatch 同款）：选择器返回带持久化授权的 tree URI
+        pickerLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE))
+        Unit
+    }
 
-    Scaffold(
-        modifier = modifier,
-        topBar = {
-            TopAppBar(
-                title = { Text("目录") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                ),
-            )
-        },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = {
-                    // 裸 Intent（NPatch 同款）：选择器返回带持久化授权的 tree URI
-                    pickerLauncher.launch(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE))
-                },
-                icon = { Icon(Icons.Rounded.Add, null) },
-                text = { Text("添加目录") },
-            )
-        },
-    ) { padding ->
+    Column(
+        modifier = modifier.fillMaxSize(),
+    ) {
+        TopAppBar(
+            title = { Text("目录") },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                titleContentColor = MaterialTheme.colorScheme.onSurface,
+            ),
+        )
+
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
-                top = padding.calculateTopPadding(),
-                bottom = padding.calculateBottomPadding() + FLOATING_BAR_CONTENT_PADDING,
+                start = 12.dp, end = 12.dp, top = 4.dp,
+                // 悬浮底栏实测占位：滚动到底时最后一项不被遮挡
+                bottom = 24.dp + LocalFloatingBarPadding.current,
             ),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            item(key = "scope") {
-                ListItem(
-                    colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-                    headlineContent = { Text("仅搜索选定目录") },
-                    supportingContent = {
-                        Text(
-                            "开启后索引只覆盖下方目录（全盘扫描暂停）；" +
-                                "目录可映射为物理路径时仍走高速扫描管线，" +
-                                "否则经文件夹选择器授权逐个读取。" +
-                                "关闭则按全盘扫描，本页目录仅作授权记录。",
-                        )
-                    },
-                    trailingContent = {
-                        Switch(
-                            checked = settings.scopedSearchOnly,
-                            onCheckedChange = { viewModel.setScopedSearchOnly(it) },
-                        )
-                    },
-                )
-            }
-            item(key = "sync") {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Button(
-                        onClick = { viewModel.syncDirIndex() },
-                        enabled = repoState.phase == ScanPhase.IDLE,
-                    ) {
-                        Icon(Icons.Rounded.Sync, null, Modifier.size(18.dp))
-                        Spacer(Modifier.height(0.dp))
-                        Text(
-                            if (settings.scopedSearchOnly) "同步选定目录" else "重建全盘索引",
-                            modifier = Modifier.padding(start = 6.dp),
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = { viewModel.startScan(incremental = false) },
-                        enabled = repoState.phase == ScanPhase.IDLE,
-                    ) {
-                        Text("增量扫描")
-                    }
+            // ---- 三步引导（解决"看不懂怎么用"） ----
+            item(key = "guide") {
+                GroupCard {
+                    Text(
+                        "怎么用",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 4.dp),
+                    )
+                    GuideStep(
+                        step = "1",
+                        icon = Icons.Rounded.Add,
+                        title = "添加目录",
+                        desc = "点下方按钮，在系统文件夹选择器里挑选想纳入搜索的文件夹并授权",
+                    )
+                    GuideStep(
+                        step = "2",
+                        icon = Icons.Rounded.ManageSearch,
+                        title = "同步索引",
+                        desc = "点「同步选定目录」，应用会读取目录里的文件名与 Office 文档正文建索引",
+                    )
+                    GuideStep(
+                        step = "3",
+                        icon = Icons.Rounded.Search,
+                        title = "去搜索",
+                        desc = "切到「搜索」页输入关键词即可命中目录内文件；" +
+                            "配合顶栏「仅搜索选定目录」开关可切换全盘/限定范围",
+                    )
+                    Spacer(Modifier.height(6.dp))
                 }
             }
+
+            // ---- 添加目录按钮（内容流内，不再用悬浮 FAB 避免被底栏遮挡） ----
+            item(key = "add") {
+                Button(
+                    onClick = launchPicker,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Icon(Icons.Rounded.Add, null, Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("添加目录")
+                }
+            }
+
+            // ---- 扫描进度实况卡（替代无反馈的静默扫描） ----
+            if (scanning) {
+                item(key = "progress") {
+                    ScanProgressCard(
+                        statusText = repoState.statusText,
+                        scanned = repoState.scanned,
+                        firstBuild = repoState.phase == ScanPhase.FIRST_BUILD,
+                        onCancel = { viewModel.cancelScan() },
+                    )
+                }
+            }
+
+            // ---- 范围开关 ----
+            item(key = "scope") {
+                GroupCard {
+                    ListItem(
+                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                        headlineContent = { Text("仅搜索选定目录") },
+                        supportingContent = {
+                            Text(
+                                "开启后搜索只覆盖上方授权的目录；" +
+                                    "关闭则全盘扫描（此时本页目录仅作授权记录）。",
+                            )
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.scopedSearchOnly,
+                                onCheckedChange = { viewModel.setScopedSearchOnly(it) },
+                            )
+                        },
+                    )
+                }
+            }
+
+            // ---- 目录列表 ----
             if (settings.searchDirs.isEmpty()) {
                 item(key = "empty") {
                     Column(
                         Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 32.dp, vertical = 48.dp),
+                            .padding(horizontal = 24.dp, vertical = 32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Icon(
@@ -182,60 +233,247 @@ fun DirectoryScreen(
                         Text("还没有授权任何目录", fontWeight = FontWeight.Medium)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "点右下角「添加目录」，通过系统文件夹\n选择器（文件提供器 API）授权后即可纳入搜索。",
+                            "点上方「添加目录」，在系统文件夹选择器中\n选择并授权，即可纳入搜索范围。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
             } else {
-                items(settings.searchDirs, key = { it }) { uriStr ->
-                    var valid by remember(uriStr) { mutableStateOf(true) }
-                    ListItem(
-                        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-                        leadingContent = {
-                            Icon(
-                                if (valid) Icons.Rounded.Folder else Icons.Rounded.FolderOff,
-                                null,
-                                tint = if (valid) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.error,
-                            )
-                        },
-                        headlineContent = { Text(SafDirs.displayName(uriStr)) },
-                        supportingContent = {
-                            Text(
-                                if (valid) {
-                                    SafDirs.treeToPath(context, uriStr) ?: SafDirs.subPath(uriStr)
-                                } else {
-                                    "授权已失效（目录被移动或权限被回收），请删除后重新添加"
-                                },
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        trailingContent = {
-                            IconButton(onClick = { viewModel.removeSearchDir(uriStr) }) {
-                                Icon(Icons.Rounded.Close, "移除", modifier = Modifier.size(18.dp))
-                            }
-                        },
+                item(key = "dirs-title") {
+                    SectionHeader(
+                        if (settings.scopedSearchOnly) "已授权目录（参与搜索）" else "已授权目录（仅记录）",
                     )
-                    // 首次进入列表时探测授权有效性（NPatch 用时校验模式）
-                    LaunchedEffect(uriStr) {
-                        valid = SafDirs.isValid(context, uriStr)
+                }
+                item(key = "dirs") {
+                    GroupCard {
+                        settings.searchDirs.forEachIndexed { index, uriStr ->
+                            if (index > 0) GroupDivider()
+                            DirectoryRow(
+                                uriStr = uriStr,
+                                onRemove = { viewModel.removeSearchDir(uriStr) },
+                            )
+                        }
                     }
                 }
             }
+
+            // ---- 同步操作区 ----
+            item(key = "sync") {
+                SectionHeader("索引操作")
+            }
+            item(key = "sync-buttons") {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Button(
+                        onClick = { viewModel.syncDirIndex() },
+                        enabled = !scanning,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Icon(Icons.Rounded.ManageSearch, null, Modifier.size(18.dp))
+                        Text(
+                            if (settings.scopedSearchOnly) "同步选定目录" else "重建全盘索引",
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { viewModel.startScan(incremental = false) },
+                        enabled = !scanning,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Text("增量扫描")
+                    }
+                }
+            }
+
+            // ---- 补充说明（收纳为可读小字） ----
             item(key = "hint") {
-                Text(
-                    "说明：授权信息保存在本机（系统级持久授权 + 目录列表）；" +
-                        "移除应用或手动回收后失效。SAF 遍历通道每次同步为整体重建，" +
-                        "目录内容量大时建议优先保持「所有文件访问」授权以走高速管线。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                )
+                GroupCard {
+                    Row(
+                        Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Icon(
+                            Icons.Rounded.HelpOutline,
+                            null,
+                            Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "授权信息保存在本机（系统级持久授权 + 目录列表），" +
+                                "移除应用后失效。SAF 遍历通道每次同步为整体重建，" +
+                                "目录内容量大时建议保持「所有文件访问」授权以走高速管线。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         }
     }
+}
+
+/** 单个目录行（GroupCard 内使用；授权有效性延迟探测，失效标红可移除）。 */
+@Composable
+private fun DirectoryRow(uriStr: String, onRemove: () -> Unit) {
+    val context = LocalContext.current
+    var valid by remember(uriStr) { mutableStateOf(true) }
+    ListItem(
+        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+        leadingContent = {
+            Icon(
+                if (valid) Icons.Rounded.Folder else Icons.Rounded.FolderOff,
+                null,
+                tint = if (valid) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.error,
+            )
+        },
+        headlineContent = { Text(SafDirs.displayName(uriStr)) },
+        supportingContent = {
+            Text(
+                if (valid) {
+                    SafDirs.treeToPath(context, uriStr) ?: SafDirs.subPath(uriStr)
+                } else {
+                    "授权已失效（目录被移动或权限被回收），请删除后重新添加"
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        trailingContent = {
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Rounded.Close, "移除", modifier = Modifier.size(18.dp))
+            }
+        },
+    )
+    // 首次进入列表时探测授权有效性（NPatch 用时校验模式）
+    LaunchedEffect(uriStr) {
+        valid = SafDirs.isValid(context, uriStr)
+    }
+}
+
+/** 三步引导行：数字圆徽 + 图标 + 标题/说明。 */
+@Composable
+private fun GuideStep(step: String, icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, desc: String) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        androidx.compose.material3.Surface(
+            shape = androidx.compose.foundation.shape.CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer,
+            modifier = Modifier.size(28.dp),
+        ) {
+            androidx.compose.foundation.layout.Box(
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    step,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Icon(
+            icon,
+            null,
+            Modifier
+                .size(22.dp)
+                .padding(top = 3.dp),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            Text(
+                desc,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** 扫描进度实况卡：不确定进度条 + 已扫描计数 + 状态文本 + 取消。 */
+@Composable
+private fun ScanProgressCard(
+    statusText: String,
+    scanned: Long,
+    firstBuild: Boolean,
+    onCancel: () -> Unit,
+) {
+    GroupCard {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Text(
+                if (firstBuild) "正在建立索引" else "正在更新索引",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(10.dp))
+            LinearProgressIndicator(
+                Modifier
+                    .fillMaxWidth()
+                    .height(6.dp),
+                strokeCap = androidx.compose.ui.graphics.StrokeCap.Round,
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "$statusText · 已处理 $scanned 个文件",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                androidx.compose.material3.TextButton(onClick = onCancel) {
+                    Text("取消", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+    }
+}
+
+// ---- 与 SettingsScreen 同款 NPatch 分组组件（同包内复用形态） ----
+
+/** 分组小标题。 */
+@Composable
+private fun SectionHeader(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+    )
+}
+
+/** 分组连块卡片（NPatch Card 同构）。 */
+@Composable
+private fun GroupCard(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(content = content)
+    }
+}
+
+/** 连块内分割线（左端缩进）。 */
+@Composable
+private fun GroupDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 56.dp),
+        thickness = 0.5.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+    )
 }
