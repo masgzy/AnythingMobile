@@ -28,9 +28,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Help
 import androidx.compose.material.icons.rounded.AllInclusive
@@ -38,24 +36,16 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.FilterList
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DrawerState
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -78,7 +68,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -96,10 +85,6 @@ import com.masgzy.anything.data.UiHit
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** 主界面导航目标（抽屉菜单）。 */
-const val ROUTE_SETTINGS = "settings"
-const val ROUTE_ABOUT = "about"
-const val ROUTE_WELCOME = "welcome"
 
 /**
  * 搜索主界面 —— 布局与交互对齐原版 Anything：
@@ -117,8 +102,7 @@ const val ROUTE_WELCOME = "welcome"
 fun SearchScreen(
     viewModel: AppViewModel,
     onRequestAllFiles: () -> Unit,
-    onNavigate: (String) -> Unit,
-    drawerState: DrawerState,
+    onOpenSyntaxHelp: () -> Unit,
 ) {
     val context = LocalContext.current
     val repoState by viewModel.repo.state.collectAsStateWithLifecycle()
@@ -177,17 +161,7 @@ fun SearchScreen(
     // 多选模式下拦截返回键
     BackHandler(enabled = inSelectMode) { selected = emptySet() }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            AppDrawer(
-                onSettings = { onNavigate(ROUTE_SETTINGS) },
-                onWelcome = onNavigate,
-                onAbout = { onNavigate(ROUTE_ABOUT) },
-            )
-        },
-    ) {
-        Scaffold(
+    Scaffold(
             topBar = {
                 // 顶栏切换带淡入淡出，避免生硬跳变
                 AnimatedContent(
@@ -211,9 +185,7 @@ fun SearchScreen(
                                 query = it
                                 viewModel.search(it)
                             },
-                            onOpenDrawer = {
-                                scope.launch { drawerState.open() }
-                            },
+                            onOpenSyntaxHelp = onOpenSyntaxHelp,
                         )
                     }
                 }
@@ -324,7 +296,6 @@ fun SearchScreen(
                 }
             }
         }
-    }
 
     // 详情面板
     detailHit?.let { hit ->
@@ -554,24 +525,23 @@ private fun FilterPanel(
     }
 }
 
-/** 普通态顶栏：汉堡 + 放大镜 + 搜索输入（原版样式，M3 配色）。 */
+/** 普通态顶栏：放大镜 + 搜索输入 + 语法教程入口（M3 配色）。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SearchTopBar(
     query: String,
     onQueryChange: (String) -> Unit,
-    onOpenDrawer: () -> Unit,
+    onOpenSyntaxHelp: () -> Unit,
 ) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.primary,
             titleContentColor = MaterialTheme.colorScheme.onPrimary,
-            navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
             actionIconContentColor = MaterialTheme.colorScheme.onPrimary,
         ),
-        navigationIcon = {
-            IconButton(onClick = onOpenDrawer) {
-                Icon(Icons.Rounded.Menu, "菜单")
+        actions = {
+            IconButton(onClick = onOpenSyntaxHelp) {
+                Icon(Icons.AutoMirrored.Rounded.Help, "搜索语法教程")
             }
         },
         title = {
@@ -631,109 +601,6 @@ private fun SelectionTopBar(
             IconButton(onClick = onDelete) { Icon(Icons.Rounded.Delete, "删除") }
         },
     )
-}
-
-/**
- * 抽屉（还原原版结构，修正宽度与布局）：
- *  - 宽度 300dp（M3 默认 360dp 在多数手机上接近全屏）；
- *  - 菜单在上，"Made with ❤"署名固定在底部；
- *  - 不再展示技术栈标签（用户不需要关心实现语言）。
- */
-@Composable
-private fun AppDrawer(
-    onSettings: () -> Unit,
-    onWelcome: (String) -> Unit,
-    onAbout: () -> Unit,
-) {
-    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
-    ModalDrawerSheet(
-        modifier = Modifier.width(minOf(300.dp, screenWidth - 56.dp)),
-    ) {
-        Column(Modifier.fillMaxSize()) {
-            Column(
-                Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
-            ) {
-                Text("Anything", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "search everything on Android",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Spacer(Modifier.height(8.dp))
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.Rounded.Settings, null) },
-                    label = { Text("设置") },
-                    selected = false,
-                    onClick = onSettings,
-                )
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.AutoMirrored.Rounded.Help, null) },
-                    label = { Text("欢迎页") },
-                    selected = false,
-                    onClick = { onWelcome(ROUTE_WELCOME) },
-                )
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.Rounded.Info, null) },
-                    label = { Text("关于") },
-                    selected = false,
-                    onClick = onAbout,
-                )
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Spacer(Modifier.height(12.dp))
-                Text("搜索语法", style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.height(8.dp))
-                SearchSyntaxHints()
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Text(
-                "Made with ❤ by AnythingMobile",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
-            )
-        }
-    }
-}
-
-/** 搜索语法速查（M4）：抽屉内的紧凑说明列表。 */
-@Composable
-private fun SearchSyntaxHints() {
-    val items = listOf(
-        "type:视频 / 音乐 / 图片 / 文档 / 文件" to "限定文件类别",
-        "dir:Download 报告" to "限定所在目录（可多级 AND）",
-        "合同 模板" to "空格分隔多个词，需同时包含",
-    )
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        items.forEach { (syntax, desc) ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    shape = MaterialTheme.shapes.small,
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                ) {
-                    Text(
-                        syntax,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
-                }
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    desc,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
 }
 
 /** 降级横幅：引擎不可用时展示。 */

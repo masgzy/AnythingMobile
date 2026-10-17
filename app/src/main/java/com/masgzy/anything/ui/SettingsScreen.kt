@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Help
 import androidx.compose.material.icons.rounded.Brightness6
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Colorize
@@ -110,6 +111,7 @@ fun SettingsScreen(
     viewModel: AppViewModel,
     onBack: () -> Unit,
     onShowWelcome: () -> Unit,
+    onOpenSyntaxHelp: () -> Unit,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val repoState by viewModel.repo.state.collectAsStateWithLifecycle()
@@ -365,6 +367,13 @@ fun SettingsScreen(
 
             // ---- 其他 ----
             SectionHeader("其他")
+
+            PreferenceCard(
+                icon = Icons.AutoMirrored.Rounded.Help,
+                title = "搜索语法教程",
+                subtitle = "type: / dir: / 短语匹配的完整用法",
+                onClick = onOpenSyntaxHelp,
+            )
 
             PreferenceCard(
                 icon = Icons.Rounded.WbTwilight,

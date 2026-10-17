@@ -19,11 +19,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -38,11 +36,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.masgzy.anything.crash.CrashReporter
 import com.masgzy.anything.ui.DirectoryScreen
 import com.masgzy.anything.ui.FloatingBottomBar
-import com.masgzy.anything.ui.ROUTE_ABOUT
-import com.masgzy.anything.ui.ROUTE_SETTINGS
-import com.masgzy.anything.ui.ROUTE_WELCOME
 import com.masgzy.anything.ui.SearchScreen
 import com.masgzy.anything.ui.SettingsScreen
+import com.masgzy.anything.ui.SyntaxHelpScreen
 import com.masgzy.anything.ui.WelcomeScreen
 import com.masgzy.anything.ui.theme.AnythingTheme
 import top.yukonga.miuix.kmp.blur.layerBackdrop
@@ -51,10 +47,9 @@ import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 /**
  * 应用入口：主题（外观设置实时生效）+ 底栏三 tab（搜索/目录/设置）+ 首次引导页。
  *
- * 导航行为（alpha17 底栏重构）：
- *  - 主界面为三页 tab（悬浮分页底栏切换，默认开；可在设置改通栏）；
- *  - 抽屉里的设置/关于入口同样落在对应 tab；关于内容已并入设置页底部；
- *  - 引导页仅在首启出现，完成后进入搜索 tab。
+ * 导航行为（alpha18）：三页 tab（搜索/目录/设置）+ 悬浮分页底栏（默认开，可改通栏）；
+ * 旧侧边栏抽屉已移除——搜索语法教程入口在搜索顶栏 ? 与设置页「其他」分区，关于并入设置页；
+ * 引导页仅在首启出现，完成后进入搜索 tab。
  *
  * 液态玻璃（NPatch FloatingGlassBottomBar 同款）：设置开启且 Android 13+ 时，
  * 内容层经 layerBackdrop 逐帧录制，底栏 LiquidGlass 模式采样折射；
@@ -145,8 +140,7 @@ private fun MainShell(
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
-
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    var showSyntaxHelp by rememberSaveable { mutableStateOf(false) }
 
     // 液态玻璃门控：与 NPatch 一致，AGSL 折射 shader 需要 Android 13（Tiramisu）
     val glass = settings.liquidGlass &&
@@ -160,8 +154,9 @@ private fun MainShell(
         null
     }
 
-    // 目录/设置 tab 返回回搜索 tab（与底栏 tab 语义一致）
+    // 返回语义：语法教程页优先关闭；否则目录/设置 tab 返回搜索 tab（与底栏语义一致）
     BackHandler(enabled = tab != 0) { tab = 0 }
+    BackHandler(enabled = showSyntaxHelp) { showSyntaxHelp = false }
 
     Box(
         Modifier
@@ -174,7 +169,9 @@ private fun MainShell(
                 .fillMaxSize()
                 .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
         ) {
-            AnimatedContent(
+            if (showSyntaxHelp) {
+                SyntaxHelpScreen(onBack = { showSyntaxHelp = false })
+            } else AnimatedContent(
                 targetState = tab,
                 transitionSpec = {
                     // M3 fade-through：旧页 70ms 快速淡出，新页延迟后淡入并轻微放大
@@ -193,15 +190,12 @@ private fun MainShell(
                         viewModel = viewModel,
                         onBack = { tab = 0 },
                         onShowWelcome = onShowWelcome,
+                        onOpenSyntaxHelp = { showSyntaxHelp = true },
                     )
                     else -> SearchScreen(
                         viewModel = viewModel,
                         onRequestAllFiles = onRequestAllFiles,
-                        onNavigate = { route ->
-                            // 抽屉入口落到底栏 tab：设置/关于 → 设置 tab（关于已并入设置页）
-                            if (route == ROUTE_SETTINGS || route == ROUTE_ABOUT) tab = 2
-                        },
-                        drawerState = drawerState,
+                        onOpenSyntaxHelp = { showSyntaxHelp = true },
                     )
                 }
             }
