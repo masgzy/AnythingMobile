@@ -22,8 +22,8 @@ android {
         applicationId = "com.masgzy.anything"
         minSdk = 24
         targetSdk = 36
-        versionCode = 17
-        versionName = "1.0.0-alpha17"
+        versionCode = 18
+        versionName = "1.0.0-alpha18"
         // 仪器化测试跑在 Android 虚拟机上（.github/workflows/emulator.yml）
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
