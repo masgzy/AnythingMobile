@@ -141,3 +141,50 @@ jobs:
         with:
           archive: false
           path: app/libs/AnythingMobile-engine-*.aar
+
+  # alpha20 Rust 引擎迁移（阶段①骨架）：与 Go AAR 链路并行验证。
+  # 阶段④宿主切换后，本 job 的 .so 将进入 release 流程。
+  rust-engine:
+    name: Rust 引擎测试 + 多 ABI .so 冒烟
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 安装 Rust 工具链（stable + Android 目标）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+          components: clippy, rustfmt
+
+      # 缓存 engine 的 registry/git/target，无 Cargo.lock 变更时秒级恢复
+      - name: Rust 依赖缓存
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+          cache-all-crates: true
+
+      - name: Rust 引擎测试（fmt + clippy 严格 + test）
+        run: |
+          cd engine
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+
+      # ubuntu runner 预装 NDK（$ANDROID_HOME/ndk/<版本>），取最新版
+      - name: 定位 Android NDK
+        run: |
+          NDK_DIR=$(ls -d "$ANDROID_HOME/ndk/"* 2>/dev/null | sort -V | tail -1)
+          [ -d "$NDK_DIR" ] || { echo "未找到 NDK"; exit 1; }
+          echo "ANDROID_NDK_HOME=$NDK_DIR" >> "$GITHUB_ENV"
+          echo "使用 NDK: $NDK_DIR"
+
+      # .so 构建冒烟：三 ABI + 16KB 页对齐校验。
+      # 输出到独立目录（不进 app/src/main/jniLibs，避免污染宿主 Go AAR 打包）。
+      - name: 构建 .so（cargo-ndk + 16KB 对齐校验）
+        run: |
+          chmod +x engine/build-so.sh
+          ./engine/build-so.sh engine/dist
+
+      - name: .so 产物体积
+        run: ls -lh engine/dist/*/libanything.so

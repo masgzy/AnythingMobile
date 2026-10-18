@@ -31,3 +31,9 @@ app/libs/engine-sources.jar
 
 # Kotlin 编译会话临时文件
 .kotlin/
+
+# Rust 引擎（engine/）
+engine/target/
+# cargo-ndk 产物（由 build-so.sh / CI 生成，不入库）
+engine/dist/
+app/src/main/jniLibs/

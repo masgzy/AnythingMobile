@@ -1,0 +1,30 @@
+# Anything 引擎构建配置（对齐 CFSTMobile engine/.cargo/config.toml 方案）
+# Android 目标：统一 16KB 页对齐（Android 15+ 16KB 页设备加载要求）
+# 参考: developer.android.com/guide/practices/page-sizes
+
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.armv7-linux-androideabi]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.i686-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[build]
+# 桌面构建的通用瘦身参数（Android 交叉编译时按 target 覆盖，不冲突）
+rustflags = ["-C", "overflow-checks=off"]
+
+[profile.release]
+# panic 策略保持默认 unwind：FFI 边界用 catch_unwind 拦截 panic，
+# 若改成 abort，任何内部 panic 都会直接杀死宿主 App 进程。
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+debug = 0
+incremental = false
+overflow-checks = false

@@ -165,9 +165,53 @@ gse 中文分词（Apache-2.0）** 的持久化倒排索引，落盘应用私有
 
 ## 8. 许可
 
-- 本项目：Apache-2.0。
-  选择理由：依赖树全部为宽松协议（BSD/MIT/Apache），GPL 传染保护暂无必要；
-  Apache-2.0 起步保留未来切换 GPL-3.0 的自由（单向门：Apache→GPL 可行，
-  反向需全体贡献者同意）。若未来引入 GPL 代码，整个项目须随之切换 GPL-3.0，
-  这也是依赖排查中放弃 AGPL 的 `fumiama/go-docx`（改用 MIT 的 godocx）的原因。
+- 本项目：GPL-3.0（v1.0.0-alpha16 起重新开源并重置仓库历史）。
 - 原版 Anything（SumStudio）：闭源，本项目未使用其任何代码，仅致敬其产品思路。
+
+## 9. Rust 引擎迁移（alpha20 进行中）
+
+Go 引擎的两项硬约束推动迁移：Go runtime 体积下限 ~10MB/ABI（arm64 APK 14.47MB、
+universal 50.70MB）；goroutine+bleve 在低端机上的索引期内存峰值偏高。
+参照同类项目 CFSTMobile（Rust 引擎，universal 6.31MB）验证了路线可行性。
+
+```
+Kotlin 外壳 —— UI/权限/SAF/磁贴/兜底解析（不变）
+        │
+        │  JNI（jni crate + JSON 协议，替代 gobind 生成的桥）
+        ▼
+Rust 引擎 engine/ —— 遍历/索引/检索/文本抽取
+        │   阶段②：tantivy + jieba-rs（替代 bleve+gse）
+        │   阶段③：zip + roxmltree + calamine + cfb + pdf（替代 Go docparse）
+        ▼
+文件系统（共享存储 / SD 卡 / OTG）
+```
+
+### 契约不变量（迁移全程有效）
+
+1. JSON 字段名与 Go 结构体 tag 严格一致（`engine/src/types.rs` ↔ `core/*.go`）；
+2. JNI 符号与 `app/.../core/RustEngine.kt` 双侧同步，`ABI_VERSION` 锁契约版本；
+3. panic 不出 FFI 边界：全部导出经 catch_unwind，Cargo profile 保持 unwind
+   （**禁改 panic=abort**，否则任何内部 panic 直接杀死 App 进程）；
+4. 错误统一抛 Java `RuntimeException`（gomobile 时代 error→throws Exception 等价物）；
+5. `.so` 统一 16KB 页对齐（`engine/.cargo/config.toml` 的
+   `-Wl,-z,max-page-size=16384`，对齐 Go AAR 的既有要求）。
+
+### 阶段计划
+
+| 阶段 | 内容 | 状态 |
+|------|------|------|
+| ① | `engine/` crate 骨架 + JNI 桥 15 导出 + build-so.sh + CI rust-engine job | ✅ 本节 |
+| ② | tantivy + jieba-rs：名称/全文索引、type:/dir: 语法、快照持久化 | ⬜ |
+| ③ | 文档解析：OOXML/CFB(.doc/.ppt/.xls/.wps)/PDF | ⬜ |
+| ④ | Kotlin 宿主切换（EngineRepository 换绑）+ 发布 alpha20 | ⬜ |
+
+### 构建与验证
+
+```bash
+cd engine
+cargo test          # 桌面冒烟（CI rust-engine job 同款）
+./build-so.sh       # cargo-ndk 三 ABI → app/src/main/jniLibs/（16KB 校验内置）
+```
+
+CI（ci.yml）新增并行 `rust-engine` job：fmt/clippy(-D warnings)/test + 三 ABI
+.so 构建冒烟；阶段④之前 Go AAR 链路保持独立运行，互不阻塞。
