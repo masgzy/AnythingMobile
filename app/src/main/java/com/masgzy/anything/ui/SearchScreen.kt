@@ -300,7 +300,10 @@ fun SearchScreen(
                     enter = fadeIn(tween(250)),
                     exit = fadeOut(tween(250)),
                 ) {
-                    FirstBuildOverlay(scanned = repoState.scanned)
+                    FirstBuildOverlay(
+                        scanned = repoState.scanned,
+                        parsedDocs = repoState.docsIndexed,
+                    )
                 }
             }
         }
@@ -727,9 +730,9 @@ private fun IndexStatusStrip(text: String, scanning: Boolean) {
     }
 }
 
-/** 首次建索引全屏遮罩（文案还原原版 CreateIndexWidget）。 */
+/** 首次建索引全屏遮罩（文案还原原版 CreateIndexWidget；alpha21 起双计数回显）。 */
 @Composable
-private fun FirstBuildOverlay(scanned: Long) {
+private fun FirstBuildOverlay(scanned: Long, parsedDocs: Long) {
     Box(
         Modifier
             .fillMaxSize()
@@ -753,7 +756,7 @@ private fun FirstBuildOverlay(scanned: Long) {
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                "正在为您建立 office 文档全文索引\n当前扫描到文件数 $scanned",
+                "正在为您建立 office 文档全文索引\n已扫描 $scanned 个文件 · 已解析 $parsedDocs 篇文档",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

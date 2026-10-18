@@ -22,6 +22,14 @@ use crate::engine::EngineImpl;
 /// 解析 worker 本地攒批阈值（Go flushAt 同款：32 条一批提交）。
 const FLUSH_AT: usize = 32;
 
+/// 单文档解析超时（alpha21）：解析库对个别畸形文件可能死循环或长时间
+/// 阻塞（PDF 畸形交叉引用表、嵌套异常的 OOXML 等），catch_unwind 防
+/// 得住 panic 防不住挂起 —— 一个挂死的任务会让 pool.run 永不返回，
+/// 宿主遮罩永久卡死（alpha20 真机反馈的最可能根因）。超时后放弃该
+/// 文档继续流水线；被遗弃的辅助线程随解析自身结束或残留（个位数，
+/// 扫描结束不影响进程）。
+const PARSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
 /// 一个待解析的文档任务。
 #[derive(Debug, Clone)]
 pub(crate) struct ParseTask {
@@ -133,17 +141,11 @@ impl ParsePool {
                 break;
             }
 
-            // 与遍历线程同样的铁律：panic 绝不跨线程存活（Rust 线程
-            // panic 不杀进程，但会毒化锁 —— 解析器全路径容错 + 独立线程
-            // 边界，最坏损失该任务）。
-            let text = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                engine.extract_doc_path(&task.path, &task.ext)
-            }))
-            .unwrap_or_else(|_| {
-                engine.notify_error("index", "core: 文档解析发生内部错误");
-                self.stop();
-                None
-            });
+            // 铁律：解析全路径容错 —— catch_unwind 防 panic，
+            // 超时防挂起（alpha21），最坏损失单个任务。
+            // None（失败/超时/panic）仅跳过该文档，不再 stop() 整条流水线
+            //（旧实现一个坏文档会拖垮整轮索引）。
+            let text = run_parse_with_timeout(&engine, &task, PARSE_TIMEOUT);
             if let Some(text) = text {
                 buf.push((task.path.clone(), text));
             }
@@ -180,6 +182,37 @@ impl ParsePool {
         if n > 0 {
             let total = engine.docs_indexed_add(n);
             engine.notify_progress("index", total);
+        }
+    }
+}
+
+/// 单文档解析（带超时兑底）：在独立辅助线程执行，worker 最多等
+/// `timeout`。panic / 失败 / 超时统一返回 None，worker 继续消费队列。
+fn run_parse_with_timeout(
+    engine: &Arc<EngineImpl>,
+    task: &ParseTask,
+    timeout: std::time::Duration,
+) -> Option<String> {
+    let eng = Arc::clone(engine);
+    let path = task.path.clone();
+    let ext = task.ext.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("anything-parse-one".to_string())
+        .spawn(move || {
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                eng.extract_doc_path(&path, &ext)
+            }));
+            let _ = tx.send(r.ok().flatten());
+        });
+    if spawned.is_err() {
+        return None; // 线程创建失败：跳过该文档
+    }
+    match rx.recv_timeout(timeout) {
+        Ok(text) => text,
+        Err(_) => {
+            engine.notify_error("index", "core: 单文档解析超时，已跳过");
+            None
         }
     }
 }

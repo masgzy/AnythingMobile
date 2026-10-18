@@ -49,6 +49,14 @@ fn is_doc_ext(ext: &str) -> bool {
     is_builtin_parsable(ext) || is_legacy_doc_ext(ext)
 }
 
+/// 进度上报闸门：累计数跨过 200 边界立即上报（Go walkDir 同款），
+/// 另加 ≥1s 心跳兑底 —— 小文件集合（累计不足 200）也至少每秒看到
+/// 一次计数推进，消除 alpha20 真机反馈的「当前扫描到文件数 0」
+/// 长时间不动的观感（纯函数便于测试）。
+fn progress_gate(total: i64, batch: i64, last_ms: i64, now_ms: i64) -> bool {
+    total % 200 < batch || now_ms - last_ms >= 1000
+}
+
 /// 引擎实现（Kotlin 经句柄间接持有）。
 pub struct EngineImpl {
     /// 工作线程数（<=0 时按 CPU 核数自动决定，上限 8 —— Go 同款）。
@@ -97,6 +105,10 @@ pub struct EngineImpl {
 
     /// 扫描线程句柄：close() 时 join 收尾，防泄漏。
     scan_thread: Mutex<Option<JoinHandle<()>>>,
+
+    /// 测试专用：置位后 run_scan 入口即 panic（验证扫描线程 catch_unwind 兑底）。
+    #[cfg(test)]
+    test_panic_in_run_scan: AtomicBool,
 }
 
 impl EngineImpl {
@@ -150,6 +162,8 @@ impl EngineImpl {
             ext_parser: RwLock::new(None),
             search_cache: Mutex::new(Vec::new()),
             scan_thread: Mutex::new(None),
+            #[cfg(test)]
+            test_panic_in_run_scan: AtomicBool::new(false),
         });
         // 秒开的关键：构造即恢复上次索引（名称/目录/外部条目快照）
         crate::persist::restore_snapshot(
@@ -235,8 +249,25 @@ impl EngineImpl {
         let engine = Arc::clone(self);
         let handle = match std::thread::Builder::new()
             .name("anything-scan".to_string())
-            .spawn(move || engine.run_scan(mode, roots))
-        {
+            .spawn(move || {
+                // FFI 铁律补强（alpha21）：run_scan 内任何 panic（含遍历钩子
+                // 经 std::thread::scope 的重抛）都不得让扫描线程静默死亡 ——
+                // 否则 scanning 永真、宿主永远收不到 OnFinished，
+                // 「首次建索引」遮罩会永久卡住（JNI 导出层的 catch_unwind
+                // 只保护调用线程，覆盖不到这条自建线程）。
+                let engine_for_run = Arc::clone(&engine);
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    engine_for_run.run_scan(mode, roots)
+                }));
+                if result.is_err() {
+                    engine.scanning.store(false, Ordering::Release);
+                    engine.notify_error("scan", "core: 扫描发生内部错误，本轮索引已中止");
+                    let stats = engine.current_stats(true);
+                    if let Ok(json) = serde_json::to_string(&stats) {
+                        engine.notify_finished(&json);
+                    }
+                }
+            }) {
             Ok(h) => h,
             Err(e) => {
                 // 线程创建失败：必须复位扫描标志，否则后续扫描永远被拒
@@ -250,6 +281,11 @@ impl EngineImpl {
 
     /// 扫描线程主体。完成/取消后统一收尾并通知宿主。
     fn run_scan(self: Arc<Self>, mode: String, roots: Vec<String>) {
+        // 测试专用注入点：验证扫描线程的 catch_unwind 兑底（生产代码零影响）
+        #[cfg(test)]
+        if self.test_panic_in_run_scan.load(Ordering::Relaxed) {
+            panic!("injected: run_scan panic probe");
+        }
         let incremental = mode == "incremental";
 
         // 解析流水线：遍历只入队，独立 worker 池消费（Go e.pp 同位）
@@ -258,6 +294,8 @@ impl EngineImpl {
 
         // 遍历钩子：批量入索引 + seen 表 + 解析入队 + 节流进度
         let e_files = Arc::clone(&self);
+        let last_notify = Arc::new(AtomicI64::new(0));
+        let ln = Arc::clone(&last_notify);
         let on_files = move |files: &[FileRecord]| {
             e_files.process_file_batch(files, incremental);
             if incremental {
@@ -268,8 +306,10 @@ impl EngineImpl {
                 .files
                 .fetch_add(files.len() as i64, Ordering::Relaxed)
                 + files.len() as i64;
-            // 跨过 200 边界时通知（Go walkDir 同款条件）
-            if n % 200 < files.len() as i64 {
+            // 跨过 200 边界立即通知；另有 ≥1s 心跳（alpha21：小集合也可见推进）
+            let now = now_millis();
+            if progress_gate(n, files.len() as i64, ln.load(Ordering::Relaxed), now) {
+                ln.store(now, Ordering::Relaxed);
                 e_files.notify_progress("scan", n);
             }
         };
@@ -1502,5 +1542,58 @@ mod tests {
         assert_eq!(e.extract_doc_path("/nonexistent.pdf", ".pdf"), None);
         // 非文档扩展名：不支持 → None
         assert_eq!(e.extract_doc_path("/a/b.xyz", ".xyz"), None);
+    }
+
+    #[test]
+    fn progress_gate_crossings_and_heartbeat() {
+        let t = 1_000_000i64;
+        // 跨 200 边界立即上报（Go 同款语义：批次覆盖到 200 的倍数才触发）
+        assert!(progress_gate(200, 200, t, t));
+        assert!(progress_gate(200, 1, t, t));
+        assert!(progress_gate(535, 500, t, t));
+        assert!(progress_gate(400, 100, t, t));
+        // 不含边界的尾批不触发（如 201 由单条批次产生）
+        assert!(!progress_gate(201, 1, t, t));
+        // 未跨边界且刚上报过：不上报（节流）
+        assert!(!progress_gate(5, 5, t, t + 100));
+        assert!(!progress_gate(350, 100, t, t + 999));
+        // 未跨边界但距上次 ≥1s：心跳上报（alpha21：小集合可见推进）
+        assert!(progress_gate(5, 5, t, t + 1000));
+        assert!(progress_gate(199, 99, t, t + 5000));
+        // 首批必上报（last=0）
+        assert!(progress_gate(1, 1, 0, t));
+    }
+
+    #[test]
+    fn scan_thread_panic_recovers_and_still_notifies() {
+        // 端到端：run_scan 中途 panic 时，扫描线程必须复位 scanning 并
+        // 发出 OnFinished（否则宿主遮罩永久卡死 —— alpha20 真机实锤的
+        // 故障类，这里是铁律回归测试）。
+        let tmp = tempfile::tempdir().unwrap();
+        for i in 0..30 {
+            std::fs::write(tmp.path().join(format!("f{i}.txt")), "x").unwrap();
+        }
+        let e = EngineImpl::new_for_test();
+        e.test_panic_in_run_scan.store(true, Ordering::Relaxed);
+        e.start_scan(&format!(r#"["{}"]"#, tmp.path().display()))
+            .unwrap();
+        for _ in 0..300 {
+            if !e.is_scanning() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!e.is_scanning(), "panic 后 scanning 必须复位");
+        // 复位后引擎必须可再次接受扫描（没有被卡死）
+        e.start_scan(&format!(r#"["{}"]"#, tmp.path().display()))
+            .unwrap();
+        e.cancel_scan();
+        for _ in 0..300 {
+            if !e.is_scanning() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!e.is_scanning(), "panic 后新扫描必须能正常发起并取消");
     }
 }

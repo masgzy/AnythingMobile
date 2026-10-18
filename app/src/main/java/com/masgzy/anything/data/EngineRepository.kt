@@ -8,9 +8,15 @@ import androidx.core.content.FileProvider
 import com.masgzy.anything.data.office.LegacyOfficeParser
 import com.masgzy.anything.rust.ProgressListener
 import com.masgzy.anything.rust.RustEngine
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -57,6 +63,8 @@ data class EngineUiState(
     val phase: ScanPhase = ScanPhase.IDLE,
     /** 本次已扫描文件数（进度提示用）。 */
     val scanned: Long = 0,
+    /** 本轮已解析入库的文档篇数（全文索引阶段，与扫描计数分开上报）。 */
+    val docsIndexed: Long = 0,
     val query: String = "",
     /** 引擎返回的全部命中（文件名/目录/全文三类混合），UI 按 Tab 拆分展示。 */
     val hits: List<UiHit> = listOf(),
@@ -155,14 +163,26 @@ class EngineRepository(context: Context) {
     )
     val state: StateFlow<EngineUiState> = _state
 
+    /** 看门狗作用域（alpha21：兑底覆盖扫描异常死亡/回调丢失导致的状态卡死）。 */
+    private val watchdogScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    @Volatile
+    private var watchdogJob: Job? = null
+
+    /** 本轮扫描开始时刻（看门狗硬超时用）；0 = 无进行中的扫描。 */
+    @Volatile
+    private var scanStartedAt = 0L
+
     private val listener = object : ProgressListener {
             override fun onProgress(phase: String?, done: Long) {
                 // phase="index"：文档解析阶段（大文档解析期间文件计数会停顿，
                 // 单独上报让用户看到进展而非卡住的扫描数）
-                val text = if (phase == "index") "正在解析文档内容… 已解析 $done 篇"
+                val indexing = phase == "index"
+                val text = if (indexing) "正在解析文档内容… 已解析 $done 篇"
                 else "更新索引中… 已扫描 $done 项"
                 _state.value = _state.value.copy(
-                    scanned = done,
+                    scanned = if (indexing) _state.value.scanned else done,
+                    docsIndexed = if (indexing) done else _state.value.docsIndexed,
                     statusText = text,
                 )
             }
@@ -189,6 +209,9 @@ class EngineRepository(context: Context) {
                         else -> "索引已是最新（${summary.files} 项）"
                     },
                 )
+                scanStartedAt = 0L
+                watchdogJob?.cancel()
+                watchdogJob = null
             }
 
             override fun onError(phase: String?, message: String?) {
@@ -242,15 +265,68 @@ class EngineRepository(context: Context) {
         _state.value = _state.value.copy(
             phase = if (first) ScanPhase.FIRST_BUILD else ScanPhase.UPDATING,
             scanned = 0,
+            docsIndexed = 0,
             statusText = if (first) "首次使用，正在为您建立文件索引…" else "更新索引中…",
         )
-        runCatching { RustEngine.startScan(eng, opt.toString()) }
+        val started = runCatching { RustEngine.startScan(eng, opt.toString()) }
             .onFailure {
                 _state.value = _state.value.copy(
                     phase = ScanPhase.IDLE,
                     statusText = "扫描启动失败: ${it.message}",
                 )
+            }.isSuccess
+        if (started) {
+            scanStartedAt = System.currentTimeMillis()
+            startScanWatchdog(first)
+        }
+    }
+
+    /**
+     * 扫描看门狗（alpha21）：兑底覆盖「扫描线程异常死亡/完成回调丢失」
+     * 导致的遮罩永久卡死。每 4s 核对 Rust 侧真实扫描标志：引擎已空闲
+     * 而 phase 未复位（OnFinished 丢失）→ 强制恢复 UI；连续两个周期
+     * 确认避免与正常收尾的毫秒级窗口竞态。另设 30 分钟硬超时：
+     * 引擎仍报扫描中但远超合理时长（遍历/解析挂死）→ 主动取消并恢复。
+     */
+    private fun startScanWatchdog(firstBuild: Boolean) {
+        watchdogJob?.cancel()
+        watchdogJob = watchdogScope.launch {
+            var idleSeen = false
+            while (isActive) {
+                delay(4000)
+                val h = engine
+                if (h == 0L) continue
+                if (_state.value.phase == ScanPhase.IDLE) break
+                val scanning = runCatching { RustEngine.isScanning(h) }.getOrNull()
+                if (scanning == false) {
+                    if (idleSeen) {
+                        _state.value = _state.value.copy(
+                            phase = ScanPhase.IDLE,
+                            statusText = "索引流程异常中断，已自动恢复；如索引不完整请在设置页重建",
+                        )
+                        scanStartedAt = 0L
+                        break
+                    }
+                    idleSeen = true
+                    continue
+                }
+                idleSeen = false
+                // 硬超时：远超首轮建索引的合理上限（30 分钟）仍报扫描中，
+                // 判定为底层挂死 —— 请求取消并恢复 UI，避免永久遮罩。
+                val startedAt = scanStartedAt
+                if (scanning == true && startedAt > 0 &&
+                    System.currentTimeMillis() - startedAt > 30 * 60_000L
+                ) {
+                    runCatching { RustEngine.cancelScan(h) }
+                    _state.value = _state.value.copy(
+                        phase = ScanPhase.IDLE,
+                        statusText = "索引耗时异常已中止（${if (firstBuild) "首次建索引" else "增量更新"}），请重试或反馈日志",
+                    )
+                    scanStartedAt = 0L
+                    break
+                }
             }
+        }
     }
 
     private fun isIndexEmpty(): Boolean = runCatching {
