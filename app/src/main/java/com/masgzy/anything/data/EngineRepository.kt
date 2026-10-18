@@ -5,9 +5,9 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import androidx.core.content.FileProvider
-import com.masgzy.anything.core.Engine
 import com.masgzy.anything.data.office.LegacyOfficeParser
-import com.masgzy.anything.core.ProgressListener
+import com.masgzy.anything.rust.ProgressListener
+import com.masgzy.anything.rust.RustEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -52,7 +52,7 @@ enum class ScanPhase { IDLE, FIRST_BUILD, UPDATING }
 /** 界面状态。 */
 data class EngineUiState(
     val ready: Boolean = false,
-    /** Go 引擎初始化失败的原因；null 表示引擎正常。引擎不可用时界面进入降级模式。 */
+    /** 引擎初始化失败的原因；null 表示引擎正常。引擎不可用时界面进入降级模式。 */
     val initError: String? = null,
     val phase: ScanPhase = ScanPhase.IDLE,
     /** 本次已扫描文件数（进度提示用）。 */
@@ -86,7 +86,7 @@ data class ScanSummary(
 }
 
 /**
- * Go 核心引擎的 Kotlin 封装。
+ * Rust 核心引擎的 Kotlin 封装（alpha20 起：libanything.so 替代 Go/gomobile AAR）。
  *
  * 鲁棒性设计：
  *  - 引擎在后台线程构造（构造时会同步恢复磁盘索引快照，避免主线程卡顿），
@@ -95,46 +95,60 @@ data class ScanSummary(
  *  - 就绪前 repoState.ready == false，自动扫描与手动按钮均被挡住；
  *  - 所有跨语言调用均 runCatching 包裹，JSON 解析失败不影响 UI 状态。
  *
- * 索引持久化（v0.3）：引擎指向 filesDir/engine_index，扫描收尾自动落盘，
+ * 索引持久化：引擎指向 filesDir/engine_index，扫描收尾自动落盘，
  * 下次启动构造即恢复 —— 打开即可搜索，不再每次全量重建。
- * 全文索引（alpha14）：正文由 Go 侧 bleve scorch 持久化（filesDir/engine_index/fts）。
+ * 正文由 Rust 侧 tantivy 持久化（filesDir/engine_index/fts），
+ * 名称/目录/外部条目由快照 index.snap 持久化。
  *
- * 引擎 API（gobind lowerCamelCase 映射）：
- *   Engine(workers, dataDir) / setListener / startScan(optionsJson) /
- *   search(q, limit) / removePaths(pathsJson) / cancelScan / isScanning / stats
+ * 引擎 API（JNI 句柄式，见 rust/RustEngine.kt 契约）：
+ *   newEngine(workers, dir) → handle / setListener(h, l) / startScan(h, json) /
+ *   search(h, q, limit) / removePaths(h, json) / cancelScan(h) / isScanning(h) / stats(h)
  */
 class EngineRepository(context: Context) {
 
     companion object {
         /**
-         * 进程级共享引擎。底层 scorch（bbolt）对索引目录持有文件锁：
-         * 同目录出现第二个 Engine 实例会等锁失败导致全文索引降级，
-         * 因此引擎必须单实例 —— Activity/ViewModel 重建一律复用。
+         * 进程级共享引擎句柄（0 = 未创建/失败）。tantivy 索引目录同样
+         * 持有独占锁：同目录第二个 writer 实例会创建失败导致全文索引
+         * 降级，因此引擎必须单实例 —— Activity/ViewModel 重建一律复用。
          */
         @Volatile
-        private var sharedEngine: Engine? = null
+        private var sharedHandle: Long = 0L
         private val engineLock = Any()
 
-        fun acquireEngine(context: Context): Engine? {
-            sharedEngine?.let { return it }
+        /** FFI ABI 版本期望值（与 Rust 侧 ABI_VERSION 对齐）。 */
+        private const val EXPECTED_ABI = 1
+
+        fun acquireEngine(context: Context): Long {
+            if (sharedHandle != 0L) return sharedHandle
             synchronized(engineLock) {
-                sharedEngine?.let { return it }
-                val eng = runCatching {
-                    Engine(0, File(context.applicationContext.filesDir, "engine_index").absolutePath)
+                if (sharedHandle != 0L) return sharedHandle
+                val dir = File(context.applicationContext.filesDir, "engine_index").absolutePath
+                val handle = runCatching {
+                    // 先触发 so 加载 + ABI 校验，再创建引擎
+                    val abi = RustEngine.abiVersion()
+                    if (abi != EXPECTED_ABI) {
+                        android.util.Log.e(
+                            "AnythingEngine",
+                            "FFI ABI 不匹配: 期望 $EXPECTED_ABI 实际 $abi（安装包损坏或版本混装）"
+                        )
+                        return 0L
+                    }
+                    RustEngine.newEngine(0, dir)
                 }.onFailure { t ->
-                    android.util.Log.e("AnythingEngine", "Go 引擎初始化失败", t)
-                }.getOrNull()
-                if (eng != null) sharedEngine = eng
-                return eng
+                    android.util.Log.e("AnythingEngine", "Rust 引擎初始化失败", t)
+                }.getOrDefault(0L)
+                if (handle != 0L) sharedHandle = handle
+                return sharedHandle
             }
         }
     }
 
     private val appContext = context.applicationContext
 
-    /** 引擎实例；null = 初始化失败，进入降级模式。后台线程构造，@Volatile 保证可见性。 */
+    /** 引擎句柄；0 = 初始化失败，进入降级模式。后台线程构造，@Volatile 保证可见性。 */
     @Volatile
-    private var engine: Engine? = null
+    private var engine: Long = 0L
 
     private val _state = MutableStateFlow(
         EngineUiState(statusText = "正在准备引擎…")
@@ -185,29 +199,31 @@ class EngineRepository(context: Context) {
     }
 
     init {
-        // 后台线程构造引擎：NewEngine 内部会同步恢复磁盘索引快照，
+        // 后台线程构造引擎：newEngine 内部会同步恢复磁盘索引快照，
         // 大索引（十万级条目）时避免阻塞主线程。就绪后置 ready=true，
         // ViewModel 监听该状态翻转并触发首次自动增量扫描。
         Thread {
-            val eng = acquireEngine(appContext)
-            engine = eng
-            eng?.setListener(listener)
-            // 旧版 Office（.doc/.xls/.ppt/.wps）宿主侧解析兜底；
-            // 失败不影响引擎本身（解析器内部自捕获异常返回空串）
-            eng?.runCatching { setExternalParser(LegacyOfficeParser()) }
-                ?.onFailure { android.util.Log.e("AnythingEngine", "注册旧版 Office 解析器失败", it) }
+            val h = acquireEngine(appContext)
+            engine = h
+            if (h != 0L) {
+                runCatching { RustEngine.setListener(h, listener) }
+                // 旧版 Office（.doc/.xls/.ppt/.wps）宿主侧解析兜底；
+                // 失败不影响引擎本身（解析器内部自捕获异常返回空串）
+                runCatching { RustEngine.setExternalParser(h, LegacyOfficeParser()) }
+                    .onFailure { android.util.Log.e("AnythingEngine", "注册旧版 Office 解析器失败", it) }
+            }
             _state.value = _state.value.copy(
-                ready = eng != null,
-                initError = if (eng == null) {
+                ready = h != 0L,
+                initError = if (h == 0L) {
                     "搜索引擎初始化失败，请尝试重新安装应用；若持续出现请提交反馈"
                 } else null,
-                statusText = if (eng == null) "引擎不可用" else "就绪",
+                statusText = if (h == 0L) "引擎不可用" else "就绪",
             )
         }.start()
     }
 
     val hasEngine: Boolean
-        get() = engine != null
+        get() = engine != 0L
 
     /**
      * 启动索引更新。
@@ -215,7 +231,8 @@ class EngineRepository(context: Context) {
      *                    false=全量重建（设置页"重建索引"）。
      */
     fun startScan(roots: Array<String>, incremental: Boolean) {
-        val eng = engine ?: return
+        val eng = engine
+        if (eng == 0L) return
         if (_state.value.phase != ScanPhase.IDLE) return
         val opt = JSONObject().apply {
             put("roots", JSONArray(roots.toList()))
@@ -227,7 +244,7 @@ class EngineRepository(context: Context) {
             scanned = 0,
             statusText = if (first) "首次使用，正在为您建立文件索引…" else "更新索引中…",
         )
-        runCatching { eng.startScan(opt.toString()) }
+        runCatching { RustEngine.startScan(eng, opt.toString()) }
             .onFailure {
                 _state.value = _state.value.copy(
                     phase = ScanPhase.IDLE,
@@ -240,12 +257,15 @@ class EngineRepository(context: Context) {
         // 必须读 indexed（索引内现存条目数，含快照恢复，与引擎 first_build 同口径）；
         // files 是"本轮遍历计数器"，冷启动尚未扫描时恒为 0，
         // 误读会导致每次进入应用都误判首次使用并弹出建索引遮罩。
-        JSONObject(engine?.stats() ?: "{}").optLong("indexed", 1) == 0L
+        val h = engine
+        if (h == 0L) return true
+        JSONObject(RustEngine.stats(h)).optLong("indexed", 1) == 0L
     }.getOrDefault(false)
 
     fun cancelScan() {
-        val eng = engine ?: return
-        runCatching { eng.cancelScan() }
+        val eng = engine
+        if (eng == 0L) return
+        runCatching { RustEngine.cancelScan(eng) }
         _state.value = _state.value.copy(statusText = "已请求取消…")
     }
 
@@ -261,32 +281,35 @@ class EngineRepository(context: Context) {
      * 调用方应等 onFinished 后重试）。
      */
     fun replaceExternalEntries(root: String, dirs: List<String>, files: List<String>): Boolean {
-        val eng = engine ?: return false
+        val eng = engine
+        if (eng == 0L) return false
         val json = JSONObject().apply {
             put("root", root)
             put("dirs", JSONArray(dirs))
             put("files", JSONArray(files))
         }.toString()
-        return runCatching { eng.replaceExternalEntries(json) }
+        return runCatching { RustEngine.replaceExternalEntries(eng, json) }
             .onFailure { android.util.Log.w("AnythingEngine", "扩展索引更新失败", it) }
             .isSuccess
     }
 
     /** 扩展条目总数（文件+目录），供设置页展示。 */
     fun externalCount(): Int = runCatching {
-        JSONObject(engine?.stats() ?: "{}").optInt("external", 0)
+        val h = engine
+        if (h == 0L) return 0
+        JSONObject(RustEngine.stats(h)).optInt("external", 0)
     }.getOrDefault(0)
 
     /** 搜索三类命中（文件名/目录名/全文），合并返回。 */
     suspend fun search(query: String) {
         val eng = engine
-        if (query.isBlank() || eng == null) {
+        if (query.isBlank() || eng == 0L) {
             _state.value = _state.value.copy(query = query, hits = emptyList())
             return
         }
         // 引擎调用 + 千条级 JSON 解析都在 Default 线程执行，不占主线程
         val parsed = withContext(Dispatchers.Default) {
-            runCatching { eng.search(query, SEARCH_LIMIT) }.map { json ->
+            runCatching { RustEngine.search(eng, query, SEARCH_LIMIT) }.map { json ->
                 val hits = mutableListOf<UiHit>()
                 var elapsed = 0L
                 var totalMatches = 0L
@@ -339,10 +362,11 @@ class EngineRepository(context: Context) {
 
     /** 删除文件后同步移出索引；返回成功删除的个数。 */
     fun removePaths(paths: List<String>): Int {
-        val eng = engine ?: return 0
+        val eng = engine
+        if (eng == 0L) return 0
         if (paths.isEmpty()) return 0
         val json = JSONArray(paths).toString()
-        val resp = runCatching { eng.removePaths(json) }.getOrNull() ?: return 0
+        val resp = runCatching { RustEngine.removePaths(eng, json) }.getOrNull() ?: return 0
         return runCatching { JSONObject(resp).optInt("removed", 0) }.getOrDefault(0)
     }
 
@@ -351,14 +375,16 @@ class EngineRepository(context: Context) {
      * 引擎忙（常规扫描进行中）返回 false，由调用方提示稍后再试。
      */
     fun ingest(entriesJSON: String): Boolean {
-        val eng = engine ?: return false
-        return runCatching { eng.ingest(entriesJSON) }.isSuccess
+        val eng = engine
+        if (eng == 0L) return false
+        return runCatching { RustEngine.ingest(eng, entriesJSON) }.isSuccess
     }
 
-    /** SAF 全文抽取：读字节后转调引擎 ExtractDoc（落临时文件复用同一套解析分发）。 */
+    /** SAF 全文抽取：读字节后转调引擎 extractDoc（落临时文件复用同一套解析分发）。 */
     fun extractDoc(name: String, data: ByteArray): String? {
-        val eng = engine ?: return null
-        return runCatching { eng.extractDoc(name, data) }.getOrNull()
+        val eng = engine
+        if (eng == 0L) return null
+        return runCatching { RustEngine.extractDoc(eng, name, data) }.getOrNull()
     }
 
     /**

@@ -23,13 +23,17 @@
 # ============================================================
 set -euo pipefail
 
-# 输出目录先解析为绝对路径（脚本随后会 cd 到 engine/，
-# 使相对参数既支持从仓库根传入 engine/dist，也支持从 engine/ 内传 dist）
-OUTPUT_DIR="${1:-../app/src/main/jniLibs}"
+# 输出目录先解析为绝对路径（脚本随后会 cd 到 engine/）。
+# 相对路径一律相对"脚本所在目录"解析，与调用方 CWD 无关：
+#   ./engine/build-so.sh            → <repo>/app/src/main/jniLibs
+#   ./engine/build-so.sh dist       → <repo>/engine/dist
+#   cd engine && ./build-so.sh dist → <repo>/engine/dist
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+OUTPUT_DIR="${1:-$SCRIPT_DIR/../app/src/main/jniLibs}"
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
 
-cd "$(dirname "$0")"
+cd "$SCRIPT_DIR"
 
 # ---- 环境检查 ----
 command -v cargo >/dev/null 2>&1 || { echo "错误: 未安装 Rust (cargo 不在 PATH)"; exit 1; }

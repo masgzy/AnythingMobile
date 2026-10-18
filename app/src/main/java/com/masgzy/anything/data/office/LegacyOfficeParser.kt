@@ -1,7 +1,7 @@
 package com.masgzy.anything.data.office
 
 import android.util.Log
-import com.masgzy.anything.core.ExternalParser
+import com.masgzy.anything.rust.ExternalParser
 import java.io.IOException
 import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
@@ -18,7 +18,7 @@ import java.nio.charset.CodingErrorAction
  *  - .ppt：PowerPoint Document 流记录树，收集 TextCharsAtom（UTF-16）、
  *    TextBytesAtom（ANSI→GB18030）与 CString。
  *
- * 抽出的文本交给 Go 引擎统一清洗入库（控制字符/PUA/无效字节）。
+ * 抽出的文本交给 Rust 引擎统一清洗入库（控制字符/PUA/无效字节）。
  * 引擎解析流水线的多个 worker 会并发调用 [extractText] —— 本类无状态，线程安全。
  */
 internal const val MAX_CHARS = 1 shl 20 // 单文档字符上限，与引擎 maxExtractText 同量级

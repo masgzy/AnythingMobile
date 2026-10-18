@@ -22,8 +22,8 @@ android {
         applicationId = "com.masgzy.anything"
         minSdk = 24
         targetSdk = 36
-        versionCode = 19
-        versionName = "1.0.0-alpha19"
+        versionCode = 20
+        versionName = "1.0.0-alpha20"
         // 仪器化测试跑在 Android 虚拟机上（.github/workflows/emulator.yml）
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -98,9 +98,8 @@ android {
 }
 
 dependencies {
-    // Go 核心引擎 AAR —— 由 build-aar.sh 或 CI 生成到 app/libs/
-    // 本地开发请先执行仓库根目录的 ./build-aar.sh
-    implementation(files("libs/engine.aar"))
+    // 引擎 = Rust 编译的 libanything.so，经 app/src/main/jniLibs/<abi>/ 打包
+    // （./engine/build-so.sh 或 CI 生成；无需任何外部依赖声明）
 
     // JVM 单测：LegacyOfficeParser / CfbReader 二进制解析回归网（P0-1）
     testImplementation("junit:junit:4.13.2")

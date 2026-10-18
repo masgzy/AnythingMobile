@@ -48,8 +48,9 @@ pdf-extract = "0.12"
 [dev-dependencies]
 tempfile = "3"
 
+# 构建参数（opt-level=s + fat LTO + strip 等）统一在 .cargo/config.toml 维护，
+# 避免两处 profile 互相覆盖。
 [profile.release]
-opt-level = "s"         # 体积优先（Android .so）
 lto = "fat"
 codegen-units = 1
 strip = "symbols"

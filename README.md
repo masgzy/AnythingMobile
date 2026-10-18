@@ -9,13 +9,13 @@
 [![Stars](https://img.shields.io/github/stars/masgzy/AnythingMobile?style=flat-square&logo=github)](https://github.com/masgzy/AnythingMobile/stargazers)
 [![License](https://img.shields.io/github/license/masgzy/AnythingMobile?style=flat-square&label=%E8%AE%B8%E5%8F%AF%E8%AF%81)](LICENSE)
 
-![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat-square&logo=go&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-1.85%2B-DEA584?style=flat-square&logo=rust&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.0-7F52FF?style=flat-square&logo=kotlin&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-7.0%2B%20%7C%20API%2024%2B-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![Material You](https://img.shields.io/badge/UI-Material%20You%20%28M3%29-6750A4?style=flat-square)
 
 致敬 Windows 平台的 [Everything](https://www.voidtools.com/)，安卓端开源实现。
-Go 高性能内核 × Kotlin Compose 原生外壳 · **完全离线 · 无广告 · 无追踪**
+**Rust 高性能内核**（tantivy + jieba）× Kotlin Compose 原生外壳 · **完全离线 · 无广告 · 无追踪**
 
 </div>
 
@@ -30,7 +30,7 @@ Go 高性能内核 × Kotlin Compose 原生外壳 · **完全离线 · 无广告
 | 自选搜索目录 | 系统文件夹选择器（SAF / 文件提供器 API）授权任意目录纳入索引；「仅搜索选定目录」开启后索引只覆盖已授权目录 |
 | 文件名秒搜 | 2-gram 倒排索引，边输入边出结果 |
 | 文档全文搜索 | docx / xlsx / pptx / pdf 正文内容也能搜；旧版 .doc / .xls / .ppt / .wps 由内置解析器兜底 |
-| 持久化全文索引 | bleve + gse 中文分词的倒排索引落盘应用私有目录，启动秒级恢复，正文不再占用运行内存 |
+| 持久化全文索引 | tantivy + jieba 中文分词的倒排索引落盘应用私有目录，启动秒级恢复，正文不再占用运行内存 |
 | 搜索语法 | `type:视频` 限定类别、`dir:Download` 限定目录、空格分隔多词（详见抽屉"搜索语法"） |
 | 自动更新索引 | 每次打开应用自动增量扫描，有变动才重解析，秒级完成；提示"更新索引中… / 索引更新完成" |
 | 类别快筛 | 底部圆钮一键筛选：视频 / 音乐 / 图片 / 文档；office 页可筛 Word / Excel / PPT |
@@ -39,6 +39,22 @@ Go 高性能内核 × Kotlin Compose 原生外壳 · **完全离线 · 无广告
 | 快捷磁贴 | 下拉通知栏点击磁贴，一键直达搜索 |
 | Android/data 扫描 | 借助 Shizuku / Stellar 特权通道收录应用数据目录（Android 11+ 隔离区）的文件名与目录名，设置内开关 + 授权按钮 |
 | 纯本地运行 | 无网络权限，索引数据不出设备 |
+
+## 为什么是 Rust
+
+alpha20 起搜索引擎内核由 Go（bleve + gse，经 gomobile 打包）整体迁移到 **Rust FFI**：
+
+| 维度 | Go/gomobile（≤alpha19） | Rust（alpha20 起） |
+|------|------------------------|-------------------|
+| 引擎单 ABI 体积 | ~10MB（Go runtime 下限） | **~3.2MB**（gzip 后，含 tantivy + jieba 词典） |
+| JNI 调用 | 经 gobind 桥接层转发 | 直连 FFI，µs 级进入引擎 |
+| 全文索引 | bleve scorch + gse | tantivy + jieba（词典同源，分词口径一致） |
+| 索引期内存 | 峰值可达数百 MB | 显著下降（tantivy 分段写入 + 攒批提交） |
+| 崩溃安全 | panic 跨界即进程退出 | FFI 边界全量 `catch_unwind`，内部故障转为一条错误回调 |
+
+搜索语义与 alpha19 完全一致：文件名/目录名 2-gram 子串检索、全文"bigram 候选收敛 + 精确子串校验"、
+`type:` / `dir:` 过滤语法、两轮配额的结果合并策略。旧版 Go 索引格式不兼容新格式，
+升级后首次启动自动全量重建（快照与全文库均如此），无需任何手动迁移。
 
 ## 下载安装
 
@@ -98,7 +114,7 @@ Android 11+ 把 `/sdcard/Android/data` 对普通应用隔离，需借助特权�
 应用已声明 `allowBackup=false`，索引快照与全文索引只存在于本机私有目录。
 
 **能搜索旧版 Office（.doc / .xls / .ppt）的内容吗？**
-能。应用内置了旧版二进制格式的解析器（无需任何额外权限与组件），
+能。应用内置了旧版二进制格式的解析器（Kotlin 层实现，无需任何额外权限与组件），
 .doc / .xls / .ppt / .wps 与新版 Office、PDF 一样参与全文搜索。
 个别加密或损坏文档解析失败时，其文件名仍可正常搜索。
 
@@ -115,19 +131,25 @@ Android 11+ 把 `/sdcard/Android/data` 对普通应用隔离，需借助特权�
 需要说明：应用不常驻后台、不监听文件变动，因此**应用运行期间**外部新增或删除的文件
 不会实时出现——可在设置页点击"立即更新索引"手动同步，或下次进入应用时自动同步。
 
+**从 alpha19 及更早版本升级，索引会丢失吗？**
+索引数据结构换成了 Rust 格式，首次启动会自动全量重建一次（耗时同首次安装建索引），
+之后照常增量更新，无需手动操作。
+
 ## 路线图
 
-- [x] M1 骨架：Go 引擎 + Compose 外壳 + CI 自动构建
+- [x] M1 骨架：引擎 + Compose 外壳 + CI 自动构建
 - [x] M2 增量重扫：进入应用自动更新索引 + "索引更新完成"提示；目录名搜索；多选/详情/删除；外观设置（对齐 ImageToolbox）
 - [x] M2.5 旧版 Office：.doc / .xls / .ppt / .wps 正文解析下沉 Kotlin 层（alpha13）
-- [x] M3 bleve + gse 持久化全文索引 + PDF 文本抽取（alpha14）：正文落盘不占运行内存，升级旧快照自动重建全文
+- [x] M3 持久化全文索引 + PDF 文本抽取（alpha14）：正文落盘不占运行内存，升级旧快照自动重建全文
 - [x] M4 搜索语法 `type:` / `dir:` 过滤 + 全文命中相关性排序（alpha14）
+- [x] M5 Rust FFI 迁移：引擎整体换用 Rust（tantivy + jieba），APK 体积与索引内存大幅下降（alpha20）
 - [ ] 后续：体验打磨、F-Droid 分发、应用内删除 Android/data 文件（Shizuku）
 
 ## 致谢
 
 - [voidtools Everything](https://www.voidtools.com/) —— 灵感来源；
 - **Anything**（SumStudio / SincereXIA 开发的闭源应用）—— 本仓库为致敬式开源重写，未使用其任何代码；
+- [tantivy](https://github.com/quickwit-oss/tantivy)（MIT）与 [jieba-rs](https://github.com/messense/jieba-rs)（MIT）—— Rust 检索生态的中坚力量；
 - [ImageToolbox](https://github.com/T8RIN/ImageToolbox) —— Material You 界面设计参考；
 - [NPatch](https://github.com/7723mod/NPatch) —— 文件夹选择器（SAF 目录授权）设计与实现参考（GPL-3.0）；
 - [vivo Sans](https://developers.vivo.com/) —— 启动图标 "Anything" 字标使用 vivo 官方免费商用字体 vivo Sans（Global Heavy）字形轮廓；本仓库不分发字体文件本身，仅嵌入由其创作的图标作品。
@@ -135,16 +157,18 @@ Android 11+ 把 `/sdcard/Android/data` 对普通应用隔离，需借助特权�
 <details>
 <summary><b>开发者入口（架构 / 构建 / 依赖许可）</b></summary>
 
-- 架构设计与里程碑：[docs/architecture.md](docs/architecture.md)
-- 本地构建：
+- 架构设计与里程碑：[docs/architecture.md](docs/architecture.md)；Rust 引擎契约：[engine/README.md](engine/README.md)
+- 本地构建（Rust stable + Android NDK + JDK 17）：
 
   ```bash
-  ./build-aar.sh               # Go 引擎 -> AAR（含 Android 15 16KB 页对齐）
-  ./gradlew :app:assembleDebug # Gradle Wrapper 已入库（9.7.1），产出多 ABI + universal APK
+  ./engine/build-so.sh          # Rust 引擎 -> app/src/main/jniLibs/<abi>/libanything.so
+                                # （cargo-ndk 三 ABI 交叉编译 + Android 15 16KB 页对齐）
+  ./gradlew :app:assembleDebug  # Gradle Wrapper 已入库（9.7.1），产出多 ABI + universal APK
   ```
 
+- 引擎单测：`cd engine && cargo test`（119 个用例：索引/搜索/解析/快照/并发契约）
 - 核心依赖均为宽松许可证，与本项目 GPL-3.0 完全兼容：
-  gomobile (BSD-3) · bleve v2 (Apache-2.0) · gse (Apache-2.0) · ledongthuc/pdf (BSD-3) · godocx (MIT) · excelize (BSD-3)
+  tantivy (MIT) · jieba-rs (MIT) · zip (MIT) · pdf-extract (MIT/Apache-2.0) · flate2 (MIT/Apache-2.0) · jni (MIT/Apache-2.0) · serde (MIT/Apache-2.0)
 - 欢迎通过 Issue 与 PR 参与贡献；提交后 CI 自动完成引擎测试与全架构构建。
 
 </details>
@@ -154,5 +178,4 @@ Android 11+ 把 `/sdcard/Android/data` 对普通应用隔离，需借助特权�
 本项目基于 [GPL-3.0](LICENSE) 协议开源：任何人在协议范围内自由使用、修改、再分发，衍生作品须以同协议开源。
 
 - 文件夹选择器（SAF 目录授权）的设计与实现参考了 [NPatch](https://github.com/7723mod/NPatch)（GPL-3.0），感谢其作者；
-- 依赖组件（gomobile / bleve / gse 等）均为 BSD / Apache / MIT 宽松许可证，与 GPL-3.0 兼容；
-- 本仓库为 Anything（SumStudio 闭源应用）的致敬式独立重写，未使用其任何代码。
+- 依赖组件（tantivy / jieba-rs / zip / pdf-extract 等）均为 MIT / Apache 宽松许可证，与 GPL-3.0 兼容；

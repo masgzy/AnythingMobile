@@ -1,10 +1,10 @@
 package com.masgzy.anything.rust
 
 /**
- * Rust 引擎 JNI 符号契约（alpha20 迁移阶段①预置，阶段④接入宿主）。
+ * Rust 引擎 JNI 符号契约（alpha20 起为宿主唯一引擎）。
  *
  * 对应 Rust 侧 `engine/src/jni_bridge.rs` 的
- * `Java_com_masgzy_anything_core_RustEngine_*` 导出 —— 类路径、方法名、
+ * `Java_com_masgzy_anything_rust_RustEngine_*` 导出 —— 类路径、方法名、
  * 参数类型任何一侧变更都必须双侧同步，否则运行时 UnsatisfiedLinkError。
  *
  * 与 Go/gomobile 时代（`core.Engine` AAR）的 API 对应关系：
@@ -17,8 +17,8 @@ package com.masgzy.anything.rust
  * 生命周期：newEngine 返回句柄（0 = 失败且伴随异常），所有方法以句柄
  * 首参寻址；close 后句柄失效，继续使用抛「引擎句柄无效或已关闭」。
  *
- * 本对象在阶段④之前不被任何宿主代码引用（惰性加载：
- * System.loadLibrary 位于 init，首次访问才执行），不影响现网 Go AAR 链路。
+ * 本对象是宿主唯一搜索引擎：libanything.so 随 APK 的 jniLibs 打包
+ * （build-so.sh 产出），System.loadLibrary 位于 init，首次访问时加载。
  */
 object RustEngine {
     init {
@@ -75,25 +75,26 @@ object RustEngine {
 }
 
 /**
- * 进度监听器（与 Go 版 ProgressListener 接口同构）。
+ * 进度监听器（与 Go 版 ProgressListener 接口同构，参数空可性也与
+ * gomobile 生成形状一致，宿主实现可无感切换）。
  * 回调在引擎工作线程触发，实现方须自行切换主线程；实现内抛出的异常
  * 被引擎吞掉（等价 Go 版 safeCall recover），不会中断扫描。
  */
 interface ProgressListener {
     /** phase 取值 "scan" | "index"；done 为累计处理的文件数。 */
-    fun onProgress(phase: String, done: Long)
+    fun onProgress(phase: String?, done: Long)
 
     /** 流程结束回调一次，statsJson 为 Stats 结构的 JSON。 */
-    fun onFinished(statsJson: String)
+    fun onFinished(statsJson: String?)
 
     /** 非致命错误（如个别目录无权限），不会中断整体流程。 */
-    fun onError(phase: String, message: String)
+    fun onError(phase: String?, message: String?)
 }
 
 /**
  * 宿主侧解析器（与 Go 版 ExternalParser 接口同构）。
- * 返回 null 或抛异常时引擎跳过该文件。
+ * 返回 null/空串或抛异常时引擎跳过该文件。
  */
 interface ExternalParser {
-    fun extractText(absPath: String): String?
+    fun extractText(absPath: String?): String?
 }
