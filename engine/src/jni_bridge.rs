@@ -1,7 +1,7 @@
 //! JNI 桥接层 —— 全部导出符号与 FFI 安全边界。
 //!
-//! ⚠️ 符号名与 Kotlin 类路径强耦合：`com.masgzy.anything.core.RustEngine`
-//! （契约见 `app/src/main/java/com/masgzy/anything/core/RustEngine.kt`）。
+//! ⚠️ 符号名与 Kotlin 类路径强耦合：`com.masgzy.anything.rust.RustEngine`
+//! （契约见 `app/src/main/java/com/masgzy/anything/rust/RustEngine.kt`）。
 //! 改名必须双侧同步，否则运行时 `UnsatisfiedLinkError`。
 //!
 //! ## 安全协议（每条导出统一执行）
@@ -112,7 +112,7 @@ fn with_engine<R>(
 
 /// Kotlin: `external fun abiVersion(): Int`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_abiVersion(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_abiVersion(
     _env: JNIEnv,
     _obj: JClass,
 ) -> jint {
@@ -121,7 +121,7 @@ pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_abiVersion(
 
 /// Kotlin: `external fun engineVersion(): String`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_engineVersion<'local>(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_engineVersion<'local>(
     env: JNIEnv<'local>,
     _obj: JClass<'local>,
 ) -> jstring {
@@ -137,7 +137,7 @@ pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_engineVersion<'l
 /// Kotlin: `external fun newEngine(workers: Int, dataDir: String): Long`
 /// 失败抛异常并返回 0。
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_newEngine<'local>(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_newEngine<'local>(
     mut env: JNIEnv<'local>,
     _obj: JClass<'local>,
     workers: jint,
@@ -159,7 +159,7 @@ pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_newEngine<'local
 
 /// Kotlin: `external fun close(handle: Long)`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_close(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_close(
     _env: JNIEnv,
     _obj: JClass,
     handle: jlong,
@@ -174,7 +174,7 @@ pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_close(
 
 /// Kotlin: `external fun setListener(handle: Long, listener: ProgressListener?)`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_setListener<'local>(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_setListener<'local>(
     mut env: JNIEnv<'local>,
     _obj: JClass<'local>,
     handle: jlong,
@@ -201,7 +201,7 @@ pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_setListener<'loc
 
 /// Kotlin: `external fun setExternalParser(handle: Long, parser: ExternalParser?)`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_setExternalParser<'local>(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_setExternalParser<'local>(
     mut env: JNIEnv<'local>,
     _obj: JClass<'local>,
     handle: jlong,
@@ -229,7 +229,7 @@ pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_setExternalParse
 
 /// Kotlin: `external fun startScan(handle: Long, optionsJson: String)`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_startScan<'local>(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_startScan<'local>(
     mut env: JNIEnv<'local>,
     _obj: JClass<'local>,
     handle: jlong,
@@ -247,7 +247,7 @@ pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_startScan<'local
 
 /// Kotlin: `external fun cancelScan(handle: Long)`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_cancelScan(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_cancelScan(
     _env: JNIEnv,
     _obj: JClass,
     handle: jlong,
@@ -260,7 +260,7 @@ pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_cancelScan(
 
 /// Kotlin: `external fun isScanning(handle: Long): Boolean`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_isScanning(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_isScanning(
     mut env: JNIEnv,
     _obj: JClass,
     handle: jlong,
@@ -280,7 +280,7 @@ pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_isScanning(
 
 /// Kotlin: `external fun stats(handle: Long): String`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_stats<'local>(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_stats<'local>(
     mut env: JNIEnv<'local>,
     _obj: JClass<'local>,
     handle: jlong,
@@ -300,7 +300,7 @@ pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_stats<'local>(
 
 /// Kotlin: `external fun search(handle: Long, query: String, limit: Long): String`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_search<'local>(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_search<'local>(
     mut env: JNIEnv<'local>,
     _obj: JClass<'local>,
     handle: jlong,
@@ -329,7 +329,7 @@ pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_search<'local>(
 
 /// Kotlin: `external fun removePaths(handle: Long, pathsJson: String): String`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_removePaths<'local>(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_removePaths<'local>(
     mut env: JNIEnv<'local>,
     _obj: JClass<'local>,
     handle: jlong,
@@ -355,7 +355,7 @@ pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_removePaths<'loc
 
 /// Kotlin: `external fun addDocumentText(handle: Long, path: String, text: String)`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_addDocumentText<'local>(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_addDocumentText<'local>(
     mut env: JNIEnv<'local>,
     _obj: JClass<'local>,
     handle: jlong,
@@ -374,7 +374,7 @@ pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_addDocumentText<
 
 /// Kotlin: `external fun ingest(handle: Long, entriesJson: String): String`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_ingest<'local>(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_ingest<'local>(
     mut env: JNIEnv<'local>,
     _obj: JClass<'local>,
     handle: jlong,
@@ -398,7 +398,7 @@ pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_ingest<'local>(
 
 /// Kotlin: `external fun extractDoc(handle: Long, name: String, data: ByteArray): String`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_extractDoc<'local>(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_extractDoc<'local>(
     mut env: JNIEnv<'local>,
     _obj: JClass<'local>,
     handle: jlong,
@@ -432,7 +432,7 @@ pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_extractDoc<'loca
 
 /// Kotlin: `external fun replaceExternalEntries(handle: Long, feedJson: String)`
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_masgzy_anything_core_RustEngine_replaceExternalEntries<'local>(
+pub extern "system" fn Java_com_masgzy_anything_rust_RustEngine_replaceExternalEntries<'local>(
     mut env: JNIEnv<'local>,
     _obj: JClass<'local>,
     handle: jlong,

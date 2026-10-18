@@ -1,4 +1,4 @@
-package com.masgzy.anything.core
+package com.masgzy.anything.rust
 
 /**
  * Rust 引擎 JNI 符号契约（alpha20 迁移阶段①预置，阶段④接入宿主）。

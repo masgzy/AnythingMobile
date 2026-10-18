@@ -23,9 +23,13 @@
 # ============================================================
 set -euo pipefail
 
-cd "$(dirname "$0")"
-
+# 输出目录先解析为绝对路径（脚本随后会 cd 到 engine/，
+# 使相对参数既支持从仓库根传入 engine/dist，也支持从 engine/ 内传 dist）
 OUTPUT_DIR="${1:-../app/src/main/jniLibs}"
+mkdir -p "$OUTPUT_DIR"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
+
+cd "$(dirname "$0")"
 
 # ---- 环境检查 ----
 command -v cargo >/dev/null 2>&1 || { echo "错误: 未安装 Rust (cargo 不在 PATH)"; exit 1; }

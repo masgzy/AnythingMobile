@@ -18,7 +18,7 @@
 //! - panic 策略保持 unwind，所有 JNI 导出经 `catch_unwind` 包裹，
 //!   任何内部 panic 转为 Java `RuntimeException`，绝不杀死宿主进程；
 //! - 字符串协议与 Go/gobind 时代一致：复合参数与返回值一律 JSON 字符串；
-//! - Kotlin 侧符号契约见 `app/src/main/java/com/masgzy/anything/core/RustEngine.kt`，
+//! - Kotlin 侧符号契约见 `app/src/main/java/com/masgzy/anything/rust/RustEngine.kt`，
 //!   类路径或方法名变更必须同步 `jni_bridge.rs`，否则运行时 `UnsatisfiedLinkError`。
 //!
 //! ## 迁移阶段（本文件为阶段①骨架）
