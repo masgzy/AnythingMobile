@@ -20,8 +20,30 @@ serde_json = "1"
 # finished_at 的 RFC3339 格式化（Go time.RFC3339 同款语义）。
 time = { version = "0.3", features = ["formatting", "parsing", "local-offset", "std"] }
 
-# 阶段②（tantivy + jieba-rs）/ 阶段③（zip + roxmltree + calamine + pdf）依赖届时接入，
-# 骨架期保持零重依赖，CI 冒烟秒级完成。
+# ---- 阶段②：名称索引 / 全文索引 ----
+# 全文索引（bleve scorch 的 Rust 等价物）：持久化倒排 + 文档存储 + mmap。
+# 自定义 Tokenizer 精确复刻 Go ftsanalyzer 语义（unigram+bigram / jieba 分词）。
+# 特性裁剪：只留 mmap + lz4（纯 Rust）；去掉 columnar-zstd（C 依赖，
+# 交叉编译需 NDK clang 且 Android .so 体积敏感）与 stemmer/stopwords
+# （自定义分词器不使用）。
+tantivy = { version = "0.27", default-features = false, features = [
+    "mmap",
+    "lz4-compression",
+] }
+# 中文分词（gse 的 Rust 等价物）：禁用内置大词典，运行时加载与 Go 版
+# 同源的 core/data/dict_zh_min.txt（gzip 压缩内嵌），保证分词口径一致。
+jieba-rs = { version = "0.11", default-features = false }
+# 词典 gzip 解压 + 快照压缩（Go gzip.BestSpeed 同等级）。
+flate2 = "1"
+
+# ---- 阶段③：文档解析 ----
+# OOXML（docx/pptx/xlsx = zip 内的 XML 文本抽取）。
+# XML 文本抽取不引第三方解析器：Go 版手写字节流扫描器（docparse.go）直译移植，
+# 语义 1:1（重命名链/嵌套同名标签/实体边界/EOF 丢节点），比通用 DOM 解析快
+# 一个数量级且零额外依赖。
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+# PDF 文本抽取（ledongthuc/pdf 的 Rust 等价物，含 CMap/Type0 字体支持）。
+pdf-extract = "0.12"
 
 [dev-dependencies]
 tempfile = "3"

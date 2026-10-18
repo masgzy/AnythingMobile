@@ -22,13 +22,33 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex};
 
-/// 遍历事件钩子。Phase ② 接入索引/解析管线时由引擎注入实现，
-/// 骨架期由 EngineImpl 用来计数、记录 seen 表与上报进度。
+/// 文件条目批次记录（入名称索引 + 增量比对 + 解析入队）。
+#[derive(Debug, Clone)]
+pub struct FileRecord {
+    pub path: String,
+    pub size: u64,
+    pub mtime: i64,
+}
+
+/// 目录条目批次记录（入目录名索引）。
+#[derive(Debug, Clone)]
+pub struct DirRecord {
+    pub path: String,
+    pub mtime: i64,
+}
+
+/// 遍历事件钩子（**批次语义**，与 Go walkDir 逐目录批量处理对齐：
+/// 每目录各一次锁获取，替代逐条目 2~3 次 —— 多线程下的锁竞争热点）。
 pub struct WalkHooks<'a> {
-    /// 文件条目（含指向目录的符号链接）：path、size、mtime(unix 毫秒)。
-    pub on_file: &'a (dyn Fn(&Path, u64, i64) + Sync + Send),
-    /// 目录条目（含根目录自身）：path、mtime(unix 毫秒)。
-    pub on_dir: &'a (dyn Fn(&Path, i64) + Sync + Send),
+    /// 目录批次：子目录（父目录 ReadDir 结果负责名字记录，Go 同款）
+    /// 与根目录自身。仅入目录名索引；seen 记录另见 [`Self::on_dir_visited`]。
+    pub on_dirs_batch: &'a (dyn Fn(&[DirRecord]) + Sync + Send),
+    /// 文件批次：一个目录的直接子文件（或根本身是文件）。seen 记录、
+    /// 增量比对、解析入队均由引擎在该钩子内完成（Go processFileBatch 同位）。
+    pub on_files_batch: &'a (dyn Fn(&[FileRecord]) + Sync + Send),
+    /// 目录 read_dir 成功（seen 记录时机 —— Go recordSeen(dir) 同位：
+    /// 读取失败目录按“本轮未见到”清除）。
+    pub on_dir_visited: &'a (dyn Fn(&Path) + Sync + Send),
     /// 非致命错误（如目录无权限），不中断整体遍历。
     pub on_error: &'a (dyn Fn(String) + Sync + Send),
 }
@@ -135,6 +155,7 @@ pub fn traverse(roots: &[String], workers: usize, cancel: &AtomicBool, hooks: &W
     let workers = workers.max(1);
     let queue = DirQueue::new();
 
+    let mut root_dirs: Vec<DirRecord> = Vec::new();
     for root in roots {
         if cancel.load(Ordering::Relaxed) {
             queue.stop();
@@ -144,14 +165,26 @@ pub fn traverse(roots: &[String], workers: usize, cancel: &AtomicBool, hooks: &W
         // 根跟随符号链接（Go 用 os.Stat 而非 lstat）
         match std::fs::metadata(&path) {
             Ok(md) if md.is_dir() => {
-                (hooks.on_dir)(&path, mtime_millis(&md));
+                root_dirs.push(DirRecord {
+                    path: root.clone(),
+                    mtime: mtime_millis(&md),
+                });
                 queue.push(path);
             }
             Ok(md) => {
-                (hooks.on_file)(&path, md.len(), mtime_millis(&md));
+                // 根本身是文件：单条批次回调（Go handleFile 同位）
+                (hooks.on_files_batch)(&[FileRecord {
+                    path: root.clone(),
+                    size: md.len(),
+                    mtime: mtime_millis(&md),
+                }]);
             }
             Err(_) => {} // 根不存在/不可访问：跳过，不报错（Go 同款静默）
         }
+    }
+    // 根目录自身批量入目录名索引（Go traverse 循环后 AddBatch(rootDirs) 同位）
+    if !root_dirs.is_empty() {
+        (hooks.on_dirs_batch)(&root_dirs);
     }
 
     std::thread::scope(|scope| {
@@ -191,6 +224,10 @@ fn walk_dir(dir: &Path, cancel: &AtomicBool, hooks: &WalkHooks, queue: &DirQueue
         }
     };
     // read_dir 成功后才记录目录自身（Go recordSeen 同序）
+    (hooks.on_dir_visited)(dir);
+
+    let mut sub_dirs: Vec<DirRecord> = Vec::new();
+    let mut file_records: Vec<FileRecord> = Vec::new();
 
     for child in entries {
         if cancel.load(Ordering::Relaxed) {
@@ -211,7 +248,10 @@ fn walk_dir(dir: &Path, cancel: &AtomicBool, hooks: &WalkHooks, queue: &DirQueue
             // 子目录名字记录在父目录的条目元数据上取一次 lstat，
             // 不再像旧实现那样处理到该目录时再 stat 一次（Go 同款）
             if let Ok(md) = child.metadata() {
-                (hooks.on_dir)(&sub, mtime_millis(&md));
+                sub_dirs.push(DirRecord {
+                    path: sub.to_string_lossy().into_owned(),
+                    mtime: mtime_millis(&md),
+                });
             }
             queue.push(sub);
             continue;
@@ -221,7 +261,20 @@ fn walk_dir(dir: &Path, cancel: &AtomicBool, hooks: &WalkHooks, queue: &DirQueue
             continue;
         }
         let Ok(md) = child.metadata() else { continue };
-        (hooks.on_file)(&sub, md.len(), mtime_millis(&md));
+        file_records.push(FileRecord {
+            path: sub.to_string_lossy().into_owned(),
+            size: md.len(),
+            mtime: mtime_millis(&md),
+        });
+    }
+
+    // 批量收录子目录 + 批量入文件名索引：每目录各一次锁获取，
+    // 替代逐条目 2~3 次（多线程下的锁竞争热点，Go 同款顺序）
+    if !sub_dirs.is_empty() {
+        (hooks.on_dirs_batch)(&sub_dirs);
+    }
+    if !file_records.is_empty() {
+        (hooks.on_files_batch)(&file_records);
     }
     false
 }
@@ -235,8 +288,9 @@ mod tests {
 
     fn no_hooks() -> WalkHooks<'static> {
         WalkHooks {
-            on_file: &|_, _, _| {},
-            on_dir: &|_, _| {},
+            on_files_batch: &|_| {},
+            on_dirs_batch: &|_| {},
+            on_dir_visited: &|_| {},
             on_error: &|_| {},
         }
     }
@@ -281,12 +335,16 @@ mod tests {
 
         let files = AtomicUsize::new(0);
         let dirs = AtomicUsize::new(0);
+        let visited = AtomicUsize::new(0);
         let hooks = WalkHooks {
-            on_file: &|_, _, _| {
-                files.fetch_add(1, Ordering::Relaxed);
+            on_files_batch: &|fs| {
+                files.fetch_add(fs.len(), Ordering::Relaxed);
             },
-            on_dir: &|_, _| {
-                dirs.fetch_add(1, Ordering::Relaxed);
+            on_dirs_batch: &|ds| {
+                dirs.fetch_add(ds.len(), Ordering::Relaxed);
+            },
+            on_dir_visited: &|_| {
+                visited.fetch_add(1, Ordering::Relaxed);
             },
             on_error: &|e| panic!("不应有错误: {e}"),
         };
@@ -301,6 +359,8 @@ mod tests {
         // 目录计数：root(根预先入册) + sub + deep + Android
         // （.hidden/LOST.DIR 剪枝；Android/data 剪枝但 Android 本身入册 —— Go 同款）
         assert_eq!(dirs.load(Ordering::Relaxed), 4);
+        // 成功访问的目录：root/sub/deep/Android（Android/data 未走 read_dir）
+        assert_eq!(visited.load(Ordering::Relaxed), 4);
     }
 
     #[test]
@@ -310,10 +370,11 @@ mod tests {
         std::fs::write(&f, "x").unwrap();
         let files = AtomicUsize::new(0);
         let hooks = WalkHooks {
-            on_file: &|_, _, _| {
-                files.fetch_add(1, Ordering::Relaxed);
+            on_files_batch: &|fs| {
+                files.fetch_add(fs.len(), Ordering::Relaxed);
             },
-            on_dir: &|_, _| {},
+            on_dirs_batch: &|_| {},
+            on_dir_visited: &|_| {},
             on_error: &|e| panic!("不应有错误: {e}"),
         };
         let cancel = AtomicBool::new(false);
@@ -331,10 +392,11 @@ mod tests {
         std::fs::write(tmp.path().join("a.txt"), "x").unwrap();
         let files = AtomicUsize::new(0);
         let hooks = WalkHooks {
-            on_file: &|_, _, _| {
-                files.fetch_add(1, Ordering::Relaxed);
+            on_files_batch: &|fs| {
+                files.fetch_add(fs.len(), Ordering::Relaxed);
             },
-            on_dir: &|_, _| {},
+            on_dirs_batch: &|_| {},
+            on_dir_visited: &|_| {},
             on_error: &|_| {},
         };
         let cancel = AtomicBool::new(true); // 预先取消：应什么都不处理
@@ -356,8 +418,9 @@ mod tests {
         let missing = tmp.path().join("gone");
         let errors = AtomicUsize::new(0);
         let hooks = WalkHooks {
-            on_file: &|_, _, _| {},
-            on_dir: &|_, _| {},
+            on_files_batch: &|_| {},
+            on_dirs_batch: &|_| {},
+            on_dir_visited: &|_| {},
             on_error: &|_| {
                 errors.fetch_add(1, Ordering::Relaxed);
             },
