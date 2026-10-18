@@ -17,8 +17,9 @@ cargo test
 ```
 
 产物：`libanything.so`（arm64-v8a / armeabi-v7a / x86_64，16KB 页对齐）。
-实测体积：arm64 7.37MB / armv7 5.26MB / x86_64 8.01MB（gzip 后约 3.0~3.4MB/ABI，
-对比 Go AAR 单 ABI ~10MB）。
+实测体积：arm64 7.37MB / armv7 5.26MB / x86_64 8.01MB。
+alpha20 发布实测：arm64 APK 8.70MB（alpha19 为 14.47MB，-40%）、
+universal 21.44MB（alpha19 为 50.70MB，-58%）。
 
 ## 与宿主的契约
 

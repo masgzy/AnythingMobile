@@ -224,10 +224,12 @@ Rust 引擎 engine/ —— 遍历/索引/检索/文本抽取
 
 ### 迁移结果（实测）
 
-| 指标 | Go（alpha19） | Rust（alpha20） |
+| 指标 | Go（alpha19） | Rust（alpha20，实测） |
 |------|---------------|-----------------|
-| .so 单 ABI（arm64，gzip 后） | ~10MB（AAR） | 3.25MB |
-| arm64 APK | 14.47MB | 预期 8~10MB |
+| .so 单 ABI（arm64） | ~10MB（AAR 内） | 7.37MB（APK 内未压缩存储） |
+| arm64 APK | 14.47MB | **8.70MB（-40%）** |
+| universal APK | 50.70MB | **21.44MB（-58%）** |
+| armeabi-v7a / x86_64 APK | — | 6.69MB / 9.31MB |
 | JNI 符号 / Kotlin 契约 | gobind 生成 | 16 导出 1:1 手写契约 |
 | 引擎测试 | go test | 119 个 Rust 用例全绿 |
 
