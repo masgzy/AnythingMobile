@@ -2,6 +2,10 @@ package com.masgzy.anything.ui
 
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -53,11 +57,13 @@ import androidx.compose.material.icons.rounded.SortByAlpha
 import androidx.compose.material.icons.rounded.SpaceDashboard
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.SystemUpdateAlt
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Tonality
 import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material.icons.rounded.WbTwilight
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -124,6 +130,7 @@ fun SettingsScreen(
     val shizukuState by viewModel.shizukuState.collectAsStateWithLifecycle()
     val externalCount by viewModel.externalCount.collectAsStateWithLifecycle()
     val privCacheBytes by viewModel.privCacheBytes.collectAsStateWithLifecycle()
+    val updateState by viewModel.updateState.collectAsStateWithLifecycle()
 
     // 进入设置页时统计一次特权导出缓存占用
     LaunchedEffect(Unit) { viewModel.refreshPrivCacheStats() }
@@ -408,7 +415,41 @@ fun SettingsScreen(
                 PreferenceItem(
                     icon = Icons.Rounded.Info,
                     title = "版本",
-                    subtitle = "${BuildConfig.VERSION_NAME} · GPL-3.0",
+                    subtitle = when (val us = updateState) {
+                        is AppViewModel.UpdateState.Checking -> "正在检查更新…"
+                        is AppViewModel.UpdateState.UpToDate ->
+                            "${BuildConfig.VERSION_NAME} · 已是最新版本"
+                        is AppViewModel.UpdateState.Failed ->
+                            "检查失败：${us.message} · 点击重试"
+                        else -> "${BuildConfig.VERSION_NAME} · GPL-3.0 · 点击检查更新"
+                    },
+                    onClick = { viewModel.checkForUpdates(manual = true) },
+                    trailing = {
+                        when (val us = updateState) {
+                            is AppViewModel.UpdateState.Checking ->
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            is AppViewModel.UpdateState.Available -> PulseDot()
+                            else -> Unit
+                        }
+                    },
+                )
+                GroupDivider()
+                PreferenceItem(
+                    icon = Icons.Rounded.SystemUpdateAlt,
+                    title = "启动时检查更新",
+                    subtitle = "进入应用几秒后向 GitHub 查询新版本，发现更新时提醒；" +
+                        "关闭后仍可在上方手动检查",
+                    trailing = {
+                        Switch(
+                            checked = settings.autoCheckUpdates,
+                            onCheckedChange = { v ->
+                                viewModel.updateSettings { s -> s.copy(autoCheckUpdates = v) }
+                            },
+                        )
+                    },
                 )
             }
 
@@ -694,6 +735,27 @@ private fun PreferenceItem(
         }
         trailing?.invoke()
     }
+}
+
+/**
+ * 脉动圆点（ImageToolbox CurrentVersionCodeSettingItem 的 pulsate 同款语言）：
+ * 有新版本时缀在「版本」行尾部，呼吸闪烁提醒用户点入检查。
+ */
+@Composable
+private fun PulseDot() {
+    val transition = rememberInfiniteTransition(label = "updatePulse")
+    val alpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+        label = "updatePulseAlpha",
+    )
+    Box(
+        Modifier
+            .size(10.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha)),
+    )
 }
 
 /** 单选弹窗（主题模式 / 排序方式共用）。 */

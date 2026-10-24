@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +53,7 @@ import com.masgzy.anything.ui.LocalFloatingBarPadding
 import com.masgzy.anything.ui.SearchScreen
 import com.masgzy.anything.ui.SettingsScreen
 import com.masgzy.anything.ui.SyntaxHelpScreen
+import com.masgzy.anything.ui.UpdateSheet
 import com.masgzy.anything.ui.WelcomeScreen
 import com.masgzy.anything.ui.log.LogScreen
 import com.masgzy.anything.ui.theme.AnythingTheme
@@ -180,6 +182,10 @@ private fun MainShell(
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
     var showSyntaxHelp by rememberSaveable { mutableStateOf(false) }
     var showLog by rememberSaveable { mutableStateOf(false) }
+    val updateState by viewModel.updateState.collectAsStateWithLifecycle()
+
+    // 启动自动检查更新（alpha24）：首次挂载后延迟几秒，开关关闭则不查
+    LaunchedEffect(Unit) { viewModel.maybeAutoCheckOnStartup() }
 
     // 底栏选中态跟随 settledPage（手势滑动时指示器同步，NPatch 同款）
     val settledPage by remember(pagerState) {
@@ -305,5 +311,13 @@ private fun MainShell(
             )
         }
         }
+    }
+
+    // —— 更新弹窗（窗口层浮层，挂载位置不影响呈现；任意 tab 均可弹出）——
+    if (updateState is AppViewModel.UpdateState.Available) {
+        UpdateSheet(
+            release = (updateState as AppViewModel.UpdateState.Available).release,
+            onDismiss = viewModel::dismissUpdate,
+        )
     }
 }

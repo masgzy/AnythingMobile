@@ -18,6 +18,7 @@ import com.masgzy.anything.data.SettingsRepository
 import com.masgzy.anything.data.ShizukuAccess
 import com.masgzy.anything.data.ThemeMode
 import com.masgzy.anything.data.UiHit
+import com.masgzy.anything.data.UpdateRepository
 import com.masgzy.anything.log.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import java.io.File
 
 /**
@@ -65,6 +67,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** 引擎统计快照（目录页索引状态卡展示）。 */
     private val _indexStats = MutableStateFlow<IndexStats?>(null)
     val indexStats: StateFlow<IndexStats?> = _indexStats
+
+    /** 应用更新检查状态（设置页「版本」项 + 更新弹窗消费）。 */
+    sealed interface UpdateState {
+        data object Idle : UpdateState
+        data object Checking : UpdateState
+        data class Available(val release: UpdateRepository.ReleaseInfo) : UpdateState
+        data object UpToDate : UpdateState
+        data class Failed(val message: String) : UpdateState
+    }
+
+    private val _updateState = MutableStateFlow<UpdateState>(UpdateState.Idle)
+    val updateState: StateFlow<UpdateState> = _updateState
+
+    /** 自动检查被用户关过弹窗后，本次会话不再自动弹（ImageToolbox cancelledUpdate 同语义）。 */
+    private var autoCheckSuppressed = false
+
+    /** 启动自动检查只触发一次。 */
+    private var autoCheckStarted = false
 
     /** 自动扫描防抖时间戳（毫秒）。 */
     private var lastAutoScanAt = 0L
@@ -141,6 +161,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             setScopedSearchOnly(next.scopedSearchOnly)
             setSearchDirs(next.searchDirs)
             setLogLevel(next.logLevel)
+            setAutoCheckUpdates(next.autoCheckUpdates)
         }
     }
 
@@ -453,6 +474,64 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             context.startActivity(intent)
             true
         }.getOrElse { false }
+    }
+
+    // ---- 检查更新（GitHub Releases API，alpha24）----
+
+    /**
+     * 启动自动检查：MainShell 首次挂载后调用，延迟几秒避开冷启动繁忙期；
+     * 开关关闭或本会话已被抑制（用户关过弹窗）则不查。无更新/失败静默回 Idle。
+     */
+    fun maybeAutoCheckOnStartup() {
+        if (autoCheckStarted) return
+        autoCheckStarted = true
+        if (!_settings.value.autoCheckUpdates) return
+        viewModelScope.launch {
+            delay(4_000)
+            if (!autoCheckSuppressed) checkForUpdates(manual = false)
+        }
+    }
+
+    /**
+     * 检查更新（设置页「版本」项点击 = manual；自动 = silent）。
+     * 手动检查结果全量反馈到 [updateState]（含失败提示）；
+     * 自动检查仅在有新版本时置 Available，无更新/失败静默回 Idle 不打扰。
+     */
+    fun checkForUpdates(manual: Boolean) {
+        if (_updateState.value is UpdateState.Checking) return
+        _updateState.value = UpdateState.Checking
+        viewModelScope.launch {
+            AppLogger.i(TAG, "update check, manual=$manual")
+            val result = runCatching { UpdateRepository.fetchLatestRelease() }
+            val release = result.getOrNull()
+            when {
+                release != null && UpdateRepository.isNewer(release.tagName) -> {
+                    // 有新版本：手动检查也应弹出（清除会话抑制）
+                    autoCheckSuppressed = false
+                    AppLogger.i(TAG, "update available, tag=${release.tagName}")
+                    _updateState.value = UpdateState.Available(release)
+                }
+                release != null -> {
+                    AppLogger.i(TAG, "up to date, remote=${release.tagName}")
+                    _updateState.value = if (manual) UpdateState.UpToDate else UpdateState.Idle
+                }
+                manual -> {
+                    val msg = result.exceptionOrNull()?.message ?: "网络错误"
+                    AppLogger.w(TAG, "update check failed: $msg")
+                    _updateState.value = UpdateState.Failed(msg)
+                }
+                else -> {
+                    AppLogger.d(TAG, "auto update check failed (silent): ${result.exceptionOrNull()?.message}")
+                    _updateState.value = UpdateState.Idle
+                }
+            }
+        }
+    }
+
+    /** 用户关闭更新弹窗：回 Idle 并抑制本次会话的自动弹窗（手动检查不受限）。 */
+    fun dismissUpdate() {
+        _updateState.value = UpdateState.Idle
+        autoCheckSuppressed = true
     }
 
     companion object {
