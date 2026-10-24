@@ -40,7 +40,10 @@ fn stats_json_parses_back_from_go_style_object() {
         serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
     let input: serde_json::Value = serde_json::from_str(go_style).unwrap();
     for k in input.as_object().unwrap().keys() {
-        assert!(round.as_object().unwrap().contains_key(k), "缺少旧契约键 {k}");
+        assert!(
+            round.as_object().unwrap().contains_key(k),
+            "缺少旧契约键 {k}"
+        );
     }
     assert!(round.as_object().unwrap().contains_key("host_cb_errors"));
 }

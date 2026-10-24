@@ -1022,10 +1022,10 @@ impl EngineImpl {
     /// 宿主回调统一入口：未送达时计入 host_cb_err（alpha23 可观测性）。
     /// 槽位缺失不计数 —— 桌面测试/宿主未注册属合法状态。
     fn notify_inner(&self, f: impl FnOnce(&ListenerSlot) -> bool) {
-        if let Some(slot) = self.listener.read().ok().and_then(|l| l.clone()) {
-            if !f(&slot) {
-                self.host_cb_err.fetch_add(1, Ordering::Relaxed);
-            }
+        if let Some(slot) = self.listener.read().ok().and_then(|l| l.clone())
+            && !f(&slot)
+        {
+            self.host_cb_err.fetch_add(1, Ordering::Relaxed);
         }
     }
 
