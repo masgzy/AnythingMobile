@@ -88,6 +88,11 @@ pub struct Stats {
     pub docs_indexed: i64,
     /// 特权通道（Shizuku/Stellar）收录的外部条目数。
     pub external: i64,
+    /// 宿主回调未送达次数（alpha23 诊断字段：Rust→Kotlin 方向 call_method
+    /// 失败，典型因 release 构建混淆了回调接口 —— keep 规则遗漏）。
+    /// 非 0 即提示宿主检查 proguard 规则；Kotlin 侧 optLong 兼容旧引擎。
+    #[serde(rename = "host_cb_errors")]
+    pub host_cb_errors: i64,
     #[serde(rename = "duration_ms")]
     pub duration_ms: i64,
     pub cancelled: bool,

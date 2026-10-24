@@ -345,10 +345,27 @@ class EngineRepository(context: Context) {
                         // UI 横条只在 lastSummary 变化时收起，只复位 phase
                         // 会让「更新索引中」横幅永久残留（alpha21 真机反馈的
                         // 「一直显示正在索引中」根因）。
-                        val indexed = runCatching {
-                            JSONObject(RustEngine.stats(h)).optLong("indexed", 0)
-                        }.getOrDefault(0L)
-                        AppLogger.w(TAG, "watchdog: engine idle but phase stuck -> force recover (indexed=$indexed)")
+                        // alpha23：seq 必须与 onFinished 同源递增 —— 漏设
+                        // 会让两次恢复摘要字段相同（seq 均为 0）时 equals
+                        // 判等，UI 去重逻辑误跳第二次恢复提示。
+                        val stats = runCatching {
+                            JSONObject(RustEngine.stats(h))
+                        }.getOrNull()
+                        val indexed = stats?.optLong("indexed", 0) ?: 0L
+                        val cbErr = stats?.optLong("host_cb_errors", 0) ?: 0L
+                        AppLogger.w(
+                            TAG,
+                            "watchdog: engine idle but phase stuck -> force recover (indexed=$indexed hostCbErr=$cbErr)"
+                        )
+                        if (cbErr > 0L) {
+                            // 回调链路异常：典型为 release 构建混淆了
+                            // ProgressListener（proguard keep 缺失），
+                            // Rust 侧 call_method 找不到方法静默失败。
+                            AppLogger.e(
+                                TAG,
+                                "watchdog: host callback failures=$cbErr —— 引擎完成事件从未到达宿主，请检查混淆 keep 规则（com.masgzy.anything.rust）"
+                            )
+                        }
                         _state.value = _state.value.copy(
                             phase = ScanPhase.IDLE,
                             lastSummary = ScanSummary(
@@ -358,6 +375,7 @@ class EngineRepository(context: Context) {
                                     System.currentTimeMillis() - scanStartedAt else 0,
                                 cancelled = false,
                                 firstBuild = false,
+                                seq = ++summarySeq,
                                 recovered = true,
                             ),
                             statusText = "索引流程异常中断，已自动恢复；如索引不完整请在设置页重建",
@@ -388,6 +406,7 @@ class EngineRepository(context: Context) {
                             durationMs = System.currentTimeMillis() - startedAt,
                             cancelled = true,
                             firstBuild = false,
+                            seq = ++summarySeq,
                             recovered = true,
                         ),
                         statusText = "索引耗时异常已中止（${if (firstBuild) "首次建索引" else "增量更新"}），请重试或反馈日志",

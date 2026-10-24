@@ -28,7 +28,10 @@ impl ListenerSlot {
     }
 
     /// Kotlin: `onProgress(phase: String, done: Long)`
-    pub fn on_progress(&self, phase: &str, done: i64) {
+    /// 返回 false = 宿主回调未送达（方法找不到/JVM 不可用）。
+    /// alpha23：返回值供引擎统计 host_cb_errors —— 回调静默丢失正是
+    /// alpha21/22 真机「一直正在索引中」的根因，必须可观测。
+    pub fn on_progress(&self, phase: &str, done: i64) -> bool {
         self.call(|env| {
             let jphase = env.new_string(phase)?;
             env.call_method(
@@ -38,11 +41,11 @@ impl ListenerSlot {
                 &[JValue::Object(&jphase), JValue::Long(done)],
             )?;
             Ok(())
-        });
+        })
     }
 
     /// Kotlin: `onFinished(statsJson: String)`
-    pub fn on_finished(&self, stats_json: &str) {
+    pub fn on_finished(&self, stats_json: &str) -> bool {
         self.call(|env| {
             let jstats = env.new_string(stats_json)?;
             env.call_method(
@@ -52,11 +55,11 @@ impl ListenerSlot {
                 &[JValue::Object(&jstats)],
             )?;
             Ok(())
-        });
+        })
     }
 
     /// Kotlin: `onError(phase: String, message: String)`
-    pub fn on_error(&self, phase: &str, message: &str) {
+    pub fn on_error(&self, phase: &str, message: &str) -> bool {
         self.call(|env| {
             let jphase = env.new_string(phase)?;
             let jmsg = env.new_string(message)?;
@@ -67,25 +70,30 @@ impl ListenerSlot {
                 &[JValue::Object(&jphase), JValue::Object(&jmsg)],
             )?;
             Ok(())
-        });
+        })
     }
 
     /// 统一回调通道：attach → 执行 → 异常清理 → detach。
-    /// 任何失败静默吞掉（Go safeCall 同语义）。
-    fn call<F>(&self, f: F)
+    /// 返回 false = 未送达（无 JVM / attach 失败 / Java 侧找不到方法或抛异常）。
+    /// 失败不再完全静默（Go safeCall 同语义保留：不向上传播、不中断扫描），
+    /// 由引擎计入 host_cb_errors 随 stats 暴露 —— 宿主据此可诊断
+    /// 「keep 规则遗漏导致 R8 改名回调丢失」这类只在 release 构建复现的问题。
+    fn call<F>(&self, f: F) -> bool
     where
         F: FnOnce(&mut JNIEnv) -> jni::errors::Result<()>,
     {
-        let Some(vm) = crate::jvm() else { return };
+        let Some(vm) = crate::jvm() else { return false };
         let Ok(mut guard) = vm.attach_current_thread() else {
-            return;
+            return false;
         };
         let env: &mut JNIEnv = &mut guard;
         if f(env).is_err() {
             // Java 侧回调抛异常 / JNI 调用失败：清掉 pending 异常，
             // 扫描流程继续（Go 版 recover 后同样只丢弃该次回调）
             let _ = env.exception_clear();
+            return false;
         }
+        true
     }
 }
 

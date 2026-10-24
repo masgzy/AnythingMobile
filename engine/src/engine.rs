@@ -88,6 +88,9 @@ pub struct EngineImpl {
     removed: AtomicI64,
     docs_found: AtomicI64,
     docs_indexed: AtomicI64,
+    /// 宿主回调未送达次数（alpha23 诊断字段：Rust→Kotlin 方向 call_method
+    /// 失败 —— 典型因 release 构建混淆了回调接口。随 stats.host_cb_errors 暴露）。
+    host_cb_err: AtomicI64,
 
     // ---- 增量扫描 seen 表（Go recordSeen 同语义）----
     seen: Mutex<Option<HashSet<String>>>,
@@ -156,6 +159,7 @@ impl EngineImpl {
             removed: AtomicI64::new(0),
             docs_found: AtomicI64::new(0),
             docs_indexed: AtomicI64::new(0),
+            host_cb_err: AtomicI64::new(0),
             seen: Mutex::new(None),
             pp: Mutex::new(None),
             listener: RwLock::new(None),
@@ -959,6 +963,7 @@ impl EngineImpl {
             docs_found: self.docs_found.load(Ordering::Relaxed),
             docs_indexed: self.docs_indexed.load(Ordering::Relaxed),
             external: self.external_count(),
+            host_cb_errors: self.host_cb_err.load(Ordering::Relaxed),
             duration_ms: if start_at > 0 {
                 now_millis() - start_at
             } else {
@@ -1014,22 +1019,26 @@ impl EngineImpl {
 
     // ------------------------------------------------------------ 通知
 
-    pub(crate) fn notify_progress(&self, phase: &str, done: i64) {
+    /// 宿主回调统一入口：未送达时计入 host_cb_err（alpha23 可观测性）。
+    /// 槽位缺失不计数 —— 桌面测试/宿主未注册属合法状态。
+    fn notify_inner(&self, f: impl FnOnce(&ListenerSlot) -> bool) {
         if let Some(slot) = self.listener.read().ok().and_then(|l| l.clone()) {
-            slot.on_progress(phase, done);
+            if !f(&slot) {
+                self.host_cb_err.fetch_add(1, Ordering::Relaxed);
+            }
         }
+    }
+
+    pub(crate) fn notify_progress(&self, phase: &str, done: i64) {
+        self.notify_inner(|s| s.on_progress(phase, done));
     }
 
     pub(crate) fn notify_finished(&self, stats_json: &str) {
-        if let Some(slot) = self.listener.read().ok().and_then(|l| l.clone()) {
-            slot.on_finished(stats_json);
-        }
+        self.notify_inner(|s| s.on_finished(stats_json));
     }
 
     pub(crate) fn notify_error(&self, phase: &str, msg: &str) {
-        if let Some(slot) = self.listener.read().ok().and_then(|l| l.clone()) {
-            slot.on_error(phase, msg);
-        }
+        self.notify_inner(|s| s.on_error(phase, msg));
     }
 }
 

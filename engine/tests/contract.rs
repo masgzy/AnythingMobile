@@ -9,7 +9,10 @@ use anything::{ABI_VERSION, engine_version};
 /// Go: json.Marshal(core.Stats{...}) 的字段顺序无关，但键名必须全同。
 #[test]
 fn stats_json_parses_back_from_go_style_object() {
-    // 模拟旧版宿主/测试里出现过的 Go 序列化输出（含全部键）
+    // 模拟旧版宿主/测试里出现过的 Go 序列化输出（含全部键）。
+    // alpha23 新增 host_cb_errors（诊断字段）：Rust 侧新增键不破坏
+    // 旧宿主（JSONObject.optLong 缺省 0）；反向（旧引擎→新宿主）同样
+    // 兼容，故此测试改为「旧输入可解析 + 新增键在输出中存在」。
     let go_style = r#"{
         "files": 120,
         "indexed": 100,
@@ -29,15 +32,17 @@ fn stats_json_parses_back_from_go_style_object() {
     assert_eq!(s.docs_found, 11);
     assert_eq!(s.external, 7);
     assert!(s.first_build);
+    // 旧输入缺 host_cb_errors → 反序列化缺省 0（向后兼容）
+    assert_eq!(s.host_cb_errors, 0);
 
-    // 再序列化：键集合与输入完全一致（无新增/缺漏）
+    // 再序列化：旧键集合一个不少 + 新增诊断键在场
     let round: serde_json::Value =
         serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
     let input: serde_json::Value = serde_json::from_str(go_style).unwrap();
-    assert_eq!(
-        round.as_object().unwrap().keys().collect::<Vec<_>>(),
-        input.as_object().unwrap().keys().collect::<Vec<_>>()
-    );
+    for k in input.as_object().unwrap().keys() {
+        assert!(round.as_object().unwrap().contains_key(k), "缺少旧契约键 {k}");
+    }
+    assert!(round.as_object().unwrap().contains_key("host_cb_errors"));
 }
 
 #[test]
