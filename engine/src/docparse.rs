@@ -802,8 +802,9 @@ fn local_name(qname: &[u8]) -> String {
 
 // ---------------------------------------------------------------- PDF
 
-/// 抽取 PDF 全文（pdf-extract：含 WinAnsi/Type0/CMap/ToUnicode 支持，
-/// 覆盖中文 PDF 主流形态；加密文档与纯扫描件返回错误）。
+/// 抽取 PDF 全文（pdf-extract：含 WinAnsi/Type0/CMap/ToUnicode 支持；
+/// vendor 补丁另支持 UniGB-UCS2 等 CJK 预定义 CMap，见 vendor/pdf-extract/。
+/// 加密文档与纯扫描件返回错误）。
 /// 整体 catch_unwind 护罩（Go 版 recover 同语义）：个别损坏内容流
 /// 最多损失该文档，panic 绝不向上传播。
 fn extract_pdf(path: &str) -> crate::error::EngineResult<String> {
@@ -1052,10 +1053,18 @@ mod tests {
             Ok(t) => assert!(!t.trim().is_empty(), "英文样张应含文本"),
             Err(e) => panic!("英文样张解析失败: {e}"),
         }
-        // 中文样张：pdf-extract 对部分 CID 字体可能失败/panic —— 允许失败
-        //（与 Go 版一致：仅该文档不参与全文索引），但不允许进程崩溃
-        let _ = extract_text(&format!("{base}/sample_zh.pdf"));
-        let _ = extract_text(&format!("{base}/sample_multi.pdf"));
+        // 中文样张：两者均含 UniGB-UCS2-H Type0 CID 字体（国内办公软件导出
+        // PDF 的主流形态，上游 pdf-extract 遇之直接 panic）。vendor 补丁后
+        // 必须成功抽出中文全文；catch_unwind 护罩继续兜底未预期 panic
+        let zh = extract_text(&format!("{base}/sample_zh.pdf"))
+            .expect("UniGB-UCS2-H 中文样张必须可提取（vendor 补丁回归）");
+        assert!(zh.contains("全文检索"), "中文样张应含『全文检索』: {zh}");
+        let multi =
+            extract_text(&format!("{base}/sample_multi.pdf")).expect("多页中文样张必须可提取");
+        assert!(
+            multi.contains("多页文档"),
+            "多页样张应含『多页文档』: {multi}"
+        );
     }
 
     /// 把一组 (name, content) 写成 zip 文件。

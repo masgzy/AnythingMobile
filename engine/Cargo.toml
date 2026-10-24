@@ -43,6 +43,10 @@ flate2 = "1"
 # 一个数量级且零额外依赖。
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 # PDF 文本抽取（ledongthuc/pdf 的 Rust 等价物，含 CMap/Type0 字体支持）。
+# 上游 0.12.1 对命名 CMap 仅认 Identity-H/V，遇国内办公导出 PDF 常见的
+# UniGB-UCS2-H（WPS/Word 中文 Type0 预定义 CID 字体）会内部 panic。
+# vendor/ 下是加了 UCS2 家族补丁的 0.12.1 全量源码（MIT），经下方
+# [patch.crates-io] 接管解析；详见 vendor/pdf-extract/VENDOR-NOTES.md。
 pdf-extract = "0.12"
 
 [dev-dependencies]
@@ -59,3 +63,8 @@ incremental = false
 overflow-checks = false
 # 注意：不能设 panic = "abort"——FFI 边界依赖 catch_unwind 拦截 panic，
 # abort 会让任何内部 panic 直接杀死宿主进程（Android 上即 App 崩溃）。
+
+# vendor 补丁：UniGB-UCS2 等 CJK 预定义 CMap 支持（见 vendor/pdf-extract/）。
+# patch 仅在本 crate 为 workspace 根时生效——engine/ 是独立 cargo 根，成立。
+[patch.crates-io]
+pdf-extract = { path = "vendor/pdf-extract" }
