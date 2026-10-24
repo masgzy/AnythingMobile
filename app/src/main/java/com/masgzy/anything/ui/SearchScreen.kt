@@ -146,17 +146,37 @@ fun SearchScreen(
     var shownSummary by remember { mutableStateOf<Any?>(null) }
     LaunchedEffect(repoState.lastSummary) {
         val s = repoState.lastSummary ?: return@LaunchedEffect
-        // 避免从设置页返回等重组场景重复提示
+        // 避免从设置页返回等重组场景重复提示（seq 保证每轮扫描的摘要判等不同）
         if (s == shownSummary) return@LaunchedEffect
         shownSummary = s
-        stripText = if (s.cancelled) "索引更新已取消" else "索引更新完成"
+        stripText = when {
+            s.recovered && s.cancelled -> "索引耗时异常已中止"
+            s.recovered -> "索引流程已自动恢复"
+            s.cancelled -> "索引更新已取消"
+            else -> "索引更新完成"
+        }
         delay(2500)
-        stripText = null
+        // 只收起"完成/恢复"类文案；若期间新一轮扫描已接管横条则不动它
+        if (repoState.phase == ScanPhase.IDLE) stripText = null
     }
     LaunchedEffect(repoState.phase) {
-        if (repoState.phase == ScanPhase.UPDATING) {
-            delay(600)
-            if (repoState.phase == ScanPhase.UPDATING) stripText = "更新索引中..."
+        when (repoState.phase) {
+            ScanPhase.UPDATING -> {
+                delay(600)
+                if (repoState.phase == ScanPhase.UPDATING) stripText = "更新索引中..."
+            }
+            // alpha22 第二道保险：扫描结束回 IDLE 后，若横条仍残留"更新索引中"
+            // （任何未预见的完成事件丢失路径），宽限 1.2s 后强制收起 ——
+            // 正常路径里 lastSummary 效果会先替换文案，此分支不会命中。
+            ScanPhase.IDLE -> {
+                if (stripText == "更新索引中...") {
+                    delay(1200)
+                    if (repoState.phase == ScanPhase.IDLE && stripText == "更新索引中...") {
+                        stripText = null
+                    }
+                }
+            }
+            else -> Unit
         }
     }
 

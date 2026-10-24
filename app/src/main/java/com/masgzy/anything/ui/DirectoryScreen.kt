@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -25,10 +26,13 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderOff
+import androidx.compose.material.icons.rounded.FolderSpecial
 import androidx.compose.material.icons.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.ManageSearch
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material.icons.rounded.TravelExplore
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -58,6 +62,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.masgzy.anything.AppViewModel
+import com.masgzy.anything.data.IndexStats
 import com.masgzy.anything.data.SafDirs
 import com.masgzy.anything.data.ScanPhase
 
@@ -93,6 +98,7 @@ fun DirectoryScreen(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val repoState by viewModel.repo.state.collectAsStateWithLifecycle()
     val scanning = repoState.phase != ScanPhase.IDLE
+    val indexStats by viewModel.indexStats.collectAsStateWithLifecycle()
 
     val pickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -132,6 +138,11 @@ fun DirectoryScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            // ---- 索引状态卡（KSU StatusCard 同款语言：主色调大卡 + 图标 + 状态行） ----
+            item(key = "status") {
+                IndexStatusCard(stats = indexStats, scanning = scanning)
+            }
+
             // ---- 三步引导（解决"看不懂怎么用"） ----
             item(key = "guide") {
                 GroupCard {
@@ -443,6 +454,110 @@ private fun ScanProgressCard(
 }
 
 // ---- 与 SettingsScreen 同款 NPatch 分组组件（同包内复用形态） ----
+
+/**
+ * 索引状态卡（alpha22，借鉴 KernelSU/SukiSU 首页 StatusCard 的设计语言）：
+ * 主色调大卡 + 状态图标 + 标题/副标题 + 底部信息行，替代原先是"盲区"的
+ * 索引规模展示 —— 用户在这里一眼看到收录了多少文件、多少文档有全文、
+ * 特权通道收录多少，以及最近一次索引更新时间。
+ */
+@Composable
+private fun IndexStatusCard(stats: IndexStats?, scanning: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // 状态图标（KSU 状态卡同款圆形衬托）
+                Surface(
+                    shape = androidx.compose.foundation.shape.CircleShape,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+                    modifier = Modifier.size(46.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            if (scanning) Icons.Rounded.SwapHoriz else Icons.Rounded.TravelExplore,
+                            null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(14.dp))
+                Column {
+                    Text(
+                        when {
+                            scanning -> "正在更新索引…"
+                            stats == null || stats.indexed <= 0L -> "尚未建立索引"
+                            else -> "索引就绪"
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    Text(
+                        when {
+                            scanning -> "完成后这里会显示最新规模"
+                            stats == null || stats.indexed <= 0L ->
+                                "回到搜索页授权后自动建立，或点下方「同步索引」"
+                            else -> "已收录 ${stats.indexed} 项 · 文档全文 ${stats.docsIndexed} 篇"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                    )
+                }
+            }
+            // 底部信息行：扩展收录 + 最近更新（KSU 状态卡下方信息 chips 同位）
+            if (!scanning && stats != null && (stats.external > 0L || stats.finishedAt.isNotBlank())) {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    if (stats.external > 0L) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Rounded.FolderSpecial,
+                                null,
+                                Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "扩展收录 ${stats.external} 项",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                            )
+                        }
+                    }
+                    if (stats.finishedAt.isNotBlank()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Rounded.Schedule,
+                                null,
+                                Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            // RFC3339（2026-10-24T08:30:45+08:00）→ 直接取 HH:mm
+                            val hm = stats.finishedAt
+                                .substringAfter('T', "")
+                                .takeIf { it.length >= 5 }
+                                ?.substring(0, 5)
+                            Text(
+                                if (hm != null) "最近更新 $hm" else "索引已完成",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 /** 分组小标题。 */
 @Composable

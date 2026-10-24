@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.masgzy.anything.data.AppSettings
 import com.masgzy.anything.data.EngineRepository
+import com.masgzy.anything.data.IndexStats
 import com.masgzy.anything.data.ScanPhase
 import com.masgzy.anything.data.ScanSummary
 import com.masgzy.anything.data.SafDirs
@@ -17,6 +18,7 @@ import com.masgzy.anything.data.SettingsRepository
 import com.masgzy.anything.data.ShizukuAccess
 import com.masgzy.anything.data.ThemeMode
 import com.masgzy.anything.data.UiHit
+import com.masgzy.anything.log.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,6 +62,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _privCacheBytes = MutableStateFlow(-1L)
     val privCacheBytes: StateFlow<Long> = _privCacheBytes
 
+    /** 引擎统计快照（目录页索引状态卡展示）。 */
+    private val _indexStats = MutableStateFlow<IndexStats?>(null)
+    val indexStats: StateFlow<IndexStats?> = _indexStats
+
     /** 自动扫描防抖时间戳（毫秒）。 */
     private var lastAutoScanAt = 0L
 
@@ -69,6 +75,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         ShizukuAccess.init(application)
+        // 日志等级：设置加载后立即生效（后续变更在 updateSettings 内同步）
+        AppLogger.level = _settings.value.logLevel
+        AppLogger.i(TAG, "app start, logLevel=${AppLogger.levelName(AppLogger.level)}")
         viewModelScope.launch {
             queryFlow.debounce(150).collect { repo.search(it) }
         }
@@ -81,12 +90,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             var lastSummarySeen: ScanSummary? = null
             repo.state.collect { st ->
                 if (st.ready && !wasReady) {
+                    AppLogger.i(TAG, "engine ready -> auto scan")
                     autoScanIfNeed()
                     refreshExternalCount()
+                    refreshIndexStats()
                 }
                 if (st.lastSummary != null && st.lastSummary !== lastSummarySeen) {
                     lastSummarySeen = st.lastSummary
+                    AppLogger.d(TAG, "summary#${st.lastSummary!!.seq} -> refreshAndroidData")
                     refreshAndroidData()
+                    refreshIndexStats()
                 }
                 wasReady = st.ready
             }
@@ -107,6 +120,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun updateSettings(transform: (AppSettings) -> AppSettings) {
         val next = transform(_settings.value)
         _settings.value = next
+        if (AppLogger.level != next.logLevel) {
+            AppLogger.level = next.logLevel
+            AppLogger.i("AnythingVM", "log level changed to ${AppLogger.levelName(next.logLevel)}")
+        }
         settingsRepo.run {
             setThemeMode(next.themeMode)
             setDynamicColor(next.dynamicColor)
@@ -123,6 +140,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             setLiquidGlass(next.liquidGlass)
             setScopedSearchOnly(next.scopedSearchOnly)
             setSearchDirs(next.searchDirs)
+            setLogLevel(next.logLevel)
         }
     }
 
@@ -155,6 +173,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val now = System.currentTimeMillis()
         if (now - lastAutoScanAt < 800) return
         lastAutoScanAt = now
+        AppLogger.d(TAG, "autoScan triggered")
         startScan(incremental = true)
     }
 
@@ -250,6 +269,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** 刷新索引统计快照（目录页状态卡）；进入目录页/扫描收尾时调用。 */
+    fun refreshIndexStats() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _indexStats.value = repo.indexStats()
+        }
+    }
+
     /** 统计特权导出缓存占用（进入设置页时调用）。 */
     fun refreshPrivCacheStats() {
         viewModelScope.launch(Dispatchers.IO) {
@@ -314,14 +340,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val base = Environment.getExternalStorageDirectory()?.absolutePath
                     ?: return@launch
                 val root = "$base/Android/data"
+                AppLogger.i(TAG, "refreshAndroidData: enumerating via shizuku root=$root")
                 repo.setStatusText("正在通过 Shizuku 读取 Android/data…")
                 val dirs = ShizukuAccess.listTree(root, "d")
                 val files = ShizukuAccess.listTree(root, "f")
                 if (dirs == null || files == null) {
+                    AppLogger.w(TAG, "refreshAndroidData: listTree failed (shizuku not running/denied)")
                     repo.setStatusText("Android/data 读取失败：请确认 Shizuku/Stellar 正在运行且已授权")
                     return@launch
                 }
                 val ok = repo.replaceExternalEntries(root, dirs, files)
+                AppLogger.i(
+                    TAG,
+                    "refreshAndroidData: replace ok=$ok dirs=${dirs.size} files=${files.size}"
+                )
                 if (ok) {
                     refreshExternalCount()
                     repo.setStatusText("已收录 Android/data ${dirs.size + files.size} 项")
@@ -424,6 +456,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
+        private const val TAG = "AnythingVM"
+
         fun factory(application: Application): ViewModelProvider.Factory =
             ViewModelProvider.AndroidViewModelFactory.getInstance(application)
     }

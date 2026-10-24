@@ -34,6 +34,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Help
 import androidx.compose.material.icons.rounded.Brightness6
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Colorize
 import androidx.compose.material.icons.rounded.Contrast
@@ -52,6 +53,7 @@ import androidx.compose.material.icons.rounded.SortByAlpha
 import androidx.compose.material.icons.rounded.SpaceDashboard
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Tonality
 import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material.icons.rounded.WbTwilight
@@ -95,6 +97,7 @@ import com.masgzy.anything.data.RoleColors
 import com.masgzy.anything.data.ScanPhase
 import com.masgzy.anything.data.ShizukuAccess
 import com.masgzy.anything.data.ThemeMode
+import com.masgzy.anything.log.AppLogger
 import com.masgzy.anything.ui.theme.ColorTupleDefaults
 import com.masgzy.anything.ui.theme.PaletteStyle
 
@@ -112,6 +115,7 @@ fun SettingsScreen(
     viewModel: AppViewModel,
     onShowWelcome: () -> Unit,
     onOpenSyntaxHelp: () -> Unit,
+    onOpenLog: () -> Unit,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val repoState by viewModel.repo.state.collectAsStateWithLifecycle()
@@ -129,6 +133,7 @@ fun SettingsScreen(
     var showStyleDialog by remember { mutableStateOf(false) }
     var showSortDialog by remember { mutableStateOf(false) }
     var showFilterLabelDialog by remember { mutableStateOf(false) }
+    var showLogLevelDialog by remember { mutableStateOf(false) }
 
     val modeLabel = when (settings.themeMode) {
         ThemeMode.SYSTEM -> "跟随系统"
@@ -377,6 +382,20 @@ fun SettingsScreen(
                 )
                 GroupDivider()
                 PreferenceItem(
+                    icon = Icons.Rounded.BugReport,
+                    title = "日志等级",
+                    subtitle = "记录 ${AppLogger.levelName(settings.logLevel)} 及以上级别的日志",
+                    onClick = { showLogLevelDialog = true },
+                )
+                GroupDivider()
+                PreferenceItem(
+                    icon = Icons.Rounded.Terminal,
+                    title = "查看与分享日志",
+                    subtitle = "查看运行日志，可导出分享用于问题反馈",
+                    onClick = onOpenLog,
+                )
+                GroupDivider()
+                PreferenceItem(
                     icon = Icons.Rounded.WbTwilight,
                     title = "重新查看欢迎页",
                     subtitle = "了解 Anything 的核心功能",
@@ -397,6 +416,25 @@ fun SettingsScreen(
             SectionHeader("关于")
             AboutContent()
         }
+    }
+
+    // ---- 日志等级选择 ----
+    if (showLogLevelDialog) {
+        OptionsDialog(
+            title = "日志等级",
+            options = listOf(
+                AppLogger.ERROR to "Error（仅错误）",
+                AppLogger.WARN to "Warn（警告及以上）",
+                AppLogger.INFO to "Info（常规运行，默认）",
+                AppLogger.DEBUG to "Debug（详细，排查问题用）",
+                AppLogger.VERBOSE to "Verbose（最详细）",
+            ),
+            selected = settings.logLevel,
+            onSelect = { lv ->
+                viewModel.updateSettings { s -> s.copy(logLevel = lv) }
+            },
+            onDismiss = { showLogLevelDialog = false },
+        )
     }
 
     // ---- 主题模式选择 ----

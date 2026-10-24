@@ -3,6 +3,7 @@ package com.masgzy.anything.data
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import com.masgzy.anything.log.AppLogger
 import com.masgzy.anything.ui.theme.ColorTupleDefaults
 import com.masgzy.anything.ui.theme.PaletteStyle
 
@@ -61,6 +62,8 @@ data class AppSettings(
     /** 已授权搜索目录（SAF tree URI 列表，JSON 存储持久化授权）。 */
     val searchDirs: List<String> = emptyList(),
     val welcomeSeen: Boolean = false,
+    /** 调试日志记录等级（android.util.Log 优先级）：低于它的不进日志缓冲。 */
+    val logLevel: Int = AppLogger.INFO,
 )
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
@@ -126,6 +129,7 @@ class SettingsRepository(context: Context) {
             (0 until arr.length()).map { arr.getString(it) }
         }.getOrDefault(emptyList()),
         welcomeSeen = prefs.getBoolean(KEY_WELCOME_SEEN, false),
+        logLevel = prefs.getInt(KEY_LOG_LEVEL, AppLogger.INFO),
     )
 
     fun setThemeMode(mode: ThemeMode) = put(KEY_THEME, mode.name)
@@ -173,6 +177,8 @@ class SettingsRepository(context: Context) {
 
     fun setWelcomeSeen(v: Boolean) = put(KEY_WELCOME_SEEN, v)
 
+    fun setLogLevel(v: Int) = put(KEY_LOG_LEVEL, v)
+
     private fun put(key: String, value: String) = prefs.edit { putString(key, value) }
 
     private fun put(key: String, value: Boolean) = prefs.edit { putBoolean(key, value) }
@@ -201,6 +207,7 @@ class SettingsRepository(context: Context) {
         private const val KEY_SCOPED_SEARCH = "scoped_search_only"
         private const val KEY_SEARCH_DIRS = "search_dirs"
         private const val KEY_WELCOME_SEEN = "welcome_seen"
+        private const val KEY_LOG_LEVEL = "log_level"
 
         @Volatile
         private var instance: SettingsRepository? = null

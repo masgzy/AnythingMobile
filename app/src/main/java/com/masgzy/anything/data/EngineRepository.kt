@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Environment
 import androidx.core.content.FileProvider
 import com.masgzy.anything.data.office.LegacyOfficeParser
+import com.masgzy.anything.log.AppLogger
 import com.masgzy.anything.rust.ProgressListener
 import com.masgzy.anything.rust.RustEngine
 import kotlinx.coroutines.CoroutineScope
@@ -52,8 +53,17 @@ private data class SearchResult(
  */
 private const val SEARCH_LIMIT = 1000L
 
-/** 索引/扫描阶段。 */
+/** 索引状态横条状态。 */
 enum class ScanPhase { IDLE, FIRST_BUILD, UPDATING }
+
+/** 引擎统计快照（目录页索引状态卡）。 */
+data class IndexStats(
+    val indexed: Long,
+    val docsFound: Long,
+    val docsIndexed: Long,
+    val external: Long,
+    val finishedAt: String,
+)
 
 /** 界面状态。 */
 data class EngineUiState(
@@ -79,7 +89,16 @@ data class EngineUiState(
     val statusText: String = "就绪",
 )
 
-/** 一次扫描/索引更新的结果摘要。 */
+/**
+ * 一次扫描/索引更新的结果摘要。
+ *
+ * seq：仓库内单调递增序号 —— 参与 equals 判等。若没有它，连续两轮
+ * "零变化 + 恰好同毫秒耗时"的增量扫描会产生逐字段相等的摘要，
+ * UI 侧 "s == shownSummary 则跳过" 的去重逻辑会把第二轮完成事件
+ * 误判为重组重放而直接 return，导致横条永远停在「更新索引中」。
+ * recovered：本轮完成非引擎回调正常上报，而是看门狗兑底恢复 —— UI 据此
+ * 展示不同文案（而非伪装成正常完成）。
+ */
 data class ScanSummary(
     val files: Long,
     val added: Long,
@@ -88,6 +107,8 @@ data class ScanSummary(
     val durationMs: Long,
     val cancelled: Boolean,
     val firstBuild: Boolean,
+    val seq: Long = 0L,
+    val recovered: Boolean = false,
 ) {
     /** 是否发生了实际变化（决定"索引更新完成"提示是否带变化数）。 */
     val changed: Boolean get() = added > 0 || updated > 0 || removed > 0
@@ -126,6 +147,8 @@ class EngineRepository(context: Context) {
 
         /** FFI ABI 版本期望值（与 Rust 侧 ABI_VERSION 对齐）。 */
         private const val EXPECTED_ABI = 1
+
+        private const val TAG = "AnythingEngine"
 
         fun acquireEngine(context: Context): Long {
             if (sharedHandle != 0L) return sharedHandle
@@ -173,8 +196,13 @@ class EngineRepository(context: Context) {
     @Volatile
     private var scanStartedAt = 0L
 
+    /** 完成摘要序号（单调递增，见 [ScanSummary.seq]）。 */
+    @Volatile
+    private var summarySeq = 0L
+
     private val listener = object : ProgressListener {
             override fun onProgress(phase: String?, done: Long) {
+                AppLogger.d(TAG, "onProgress phase=$phase done=$done")
                 // phase="index"：文档解析阶段（大文档解析期间文件计数会停顿，
                 // 单独上报让用户看到进展而非卡住的扫描数）
                 val indexing = phase == "index"
@@ -188,6 +216,7 @@ class EngineRepository(context: Context) {
             }
 
             override fun onFinished(statsJSON: String?) {
+                AppLogger.i(TAG, "onFinished stats=$statsJSON")
                 val o = runCatching { JSONObject(statsJSON ?: "{}") }.getOrNull()
                 val summary = ScanSummary(
                     files = o?.optLong("files") ?: 0,
@@ -200,7 +229,7 @@ class EngineRepository(context: Context) {
                 )
                 _state.value = _state.value.copy(
                     phase = ScanPhase.IDLE,
-                    lastSummary = summary,
+                    lastSummary = summary.copy(seq = ++summarySeq),
                     statusText = when {
                         summary.cancelled -> "已取消，已索引 ${summary.files} 项"
                         summary.firstBuild -> "首次索引创建完成，共 ${summary.files} 项"
@@ -215,6 +244,7 @@ class EngineRepository(context: Context) {
             }
 
             override fun onError(phase: String?, message: String?) {
+                AppLogger.e(TAG, "onError phase=$phase message=$message")
                 _state.value = _state.value.copy(
                     statusText = "提醒: ${message ?: "未知错误"}"
                 )
@@ -226,14 +256,17 @@ class EngineRepository(context: Context) {
         // 大索引（十万级条目）时避免阻塞主线程。就绪后置 ready=true，
         // ViewModel 监听该状态翻转并触发首次自动增量扫描。
         Thread {
+            val t0 = System.currentTimeMillis()
             val h = acquireEngine(appContext)
             engine = h
+            AppLogger.i(TAG, "engine acquired handle=$h took=${System.currentTimeMillis() - t0}ms")
             if (h != 0L) {
                 runCatching { RustEngine.setListener(h, listener) }
+                    .onFailure { AppLogger.e(TAG, "setListener failed", it) }
                 // 旧版 Office（.doc/.xls/.ppt/.wps）宿主侧解析兜底；
                 // 失败不影响引擎本身（解析器内部自捕获异常返回空串）
                 runCatching { RustEngine.setExternalParser(h, LegacyOfficeParser()) }
-                    .onFailure { android.util.Log.e("AnythingEngine", "注册旧版 Office 解析器失败", it) }
+                    .onFailure { AppLogger.e(TAG, "注册旧版 Office 解析器失败", it) }
             }
             _state.value = _state.value.copy(
                 ready = h != 0L,
@@ -256,7 +289,14 @@ class EngineRepository(context: Context) {
     fun startScan(roots: Array<String>, incremental: Boolean) {
         val eng = engine
         if (eng == 0L) return
-        if (_state.value.phase != ScanPhase.IDLE) return
+        if (_state.value.phase != ScanPhase.IDLE) {
+            AppLogger.w(TAG, "startScan ignored: phase=${_state.value.phase}")
+            return
+        }
+        AppLogger.i(
+            TAG,
+            "startScan mode=${if (incremental) "incremental" else "full"} roots=${roots.contentToString()}"
+        )
         val opt = JSONObject().apply {
             put("roots", JSONArray(roots.toList()))
             put("mode", if (incremental) "incremental" else "full")
@@ -270,6 +310,7 @@ class EngineRepository(context: Context) {
         )
         val started = runCatching { RustEngine.startScan(eng, opt.toString()) }
             .onFailure {
+                AppLogger.e(TAG, "startScan failed", it)
                 _state.value = _state.value.copy(
                     phase = ScanPhase.IDLE,
                     statusText = "扫描启动失败: ${it.message}",
@@ -300,11 +341,29 @@ class EngineRepository(context: Context) {
                 val scanning = runCatching { RustEngine.isScanning(h) }.getOrNull()
                 if (scanning == false) {
                     if (idleSeen) {
+                        // alpha22 关键：恢复时必须补发 lastSummary ——
+                        // UI 横条只在 lastSummary 变化时收起，只复位 phase
+                        // 会让「更新索引中」横幅永久残留（alpha21 真机反馈的
+                        // 「一直显示正在索引中」根因）。
+                        val indexed = runCatching {
+                            JSONObject(RustEngine.stats(h)).optLong("indexed", 0)
+                        }.getOrDefault(0L)
+                        AppLogger.w(TAG, "watchdog: engine idle but phase stuck -> force recover (indexed=$indexed)")
                         _state.value = _state.value.copy(
                             phase = ScanPhase.IDLE,
+                            lastSummary = ScanSummary(
+                                files = indexed,
+                                added = 0, updated = 0, removed = 0,
+                                durationMs = if (scanStartedAt > 0)
+                                    System.currentTimeMillis() - scanStartedAt else 0,
+                                cancelled = false,
+                                firstBuild = false,
+                                recovered = true,
+                            ),
                             statusText = "索引流程异常中断，已自动恢复；如索引不完整请在设置页重建",
                         )
                         scanStartedAt = 0L
+                        watchdogJob = null
                         break
                     }
                     idleSeen = true
@@ -317,12 +376,24 @@ class EngineRepository(context: Context) {
                 if (scanning == true && startedAt > 0 &&
                     System.currentTimeMillis() - startedAt > 30 * 60_000L
                 ) {
+                    AppLogger.e(TAG, "watchdog: scan exceeded 30min -> cancel and recover")
                     runCatching { RustEngine.cancelScan(h) }
                     _state.value = _state.value.copy(
                         phase = ScanPhase.IDLE,
+                        lastSummary = ScanSummary(
+                            files = runCatching {
+                                JSONObject(RustEngine.stats(h)).optLong("indexed", 0)
+                            }.getOrDefault(0L),
+                            added = 0, updated = 0, removed = 0,
+                            durationMs = System.currentTimeMillis() - startedAt,
+                            cancelled = true,
+                            firstBuild = false,
+                            recovered = true,
+                        ),
                         statusText = "索引耗时异常已中止（${if (firstBuild) "首次建索引" else "增量更新"}），请重试或反馈日志",
                     )
                     scanStartedAt = 0L
+                    watchdogJob = null
                     break
                 }
             }
@@ -376,6 +447,22 @@ class EngineRepository(context: Context) {
         JSONObject(RustEngine.stats(h)).optInt("external", 0)
     }.getOrDefault(0)
 
+    /** 引擎统计快照（目录页索引状态卡展示用）；引擎不可用返回 null。 */
+    fun indexStats(): IndexStats? {
+        val h = engine
+        if (h == 0L) return null
+        return runCatching {
+            val o = JSONObject(RustEngine.stats(h))
+            IndexStats(
+                indexed = o.optLong("indexed", 0),
+                docsFound = o.optLong("docs_found", 0),
+                docsIndexed = o.optLong("docs_indexed", 0),
+                external = o.optLong("external", 0),
+                finishedAt = o.optString("finished_at", ""),
+            )
+        }.getOrNull()
+    }
+
     /** 搜索三类命中（文件名/目录名/全文），合并返回。 */
     suspend fun search(query: String) {
         val eng = engine
@@ -419,6 +506,10 @@ class EngineRepository(context: Context) {
             }
         }
         parsed.onSuccess { r ->
+            AppLogger.d(
+                TAG,
+                "search q=\"$query\" hits=${r.hits.size}/${r.totalMatches} elapsed=${r.elapsed}ms"
+            )
             _state.value = _state.value.copy(
                 query = query, hits = r.hits, elapsedMs = r.elapsed,
                 totalMatches = r.totalMatches, totalFiles = r.totalFiles,

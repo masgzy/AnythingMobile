@@ -9,7 +9,9 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,6 +62,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.masgzy.anything.data.UiHit
+import com.masgzy.anything.ui.animation.pressScale
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -162,11 +165,18 @@ fun HitItem(
 ) {
     val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer
     else MaterialTheme.colorScheme.surface
-    Surface(color = bg, modifier = Modifier.fillMaxWidth()) {
+    // KSU 管理器同款按压弹性（alpha22）：同一 interactionSource 驱动点击与缩放
+    val interaction = remember { MutableInteractionSource() }
+    Surface(color = bg, modifier = Modifier.fillMaxWidth().pressScale(interaction)) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .combinedClickable(
+                    interactionSource = interaction,
+                    indication = LocalIndication.current,
+                    onClick = onClick,
+                    onLongClick = onLongClick,
+                )
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

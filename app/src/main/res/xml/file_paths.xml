@@ -5,4 +5,6 @@
     <cache-path name="cache" path="." />
     <!-- 崩溃日志（filesDir/crash/） -->
     <files-path name="crash" path="crash/" />
+    <!-- 调试日志导出（filesDir/logs/，alpha22） -->
+    <files-path name="logs" path="logs/" />
 </paths>

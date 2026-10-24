@@ -45,6 +45,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.masgzy.anything.crash.CrashReporter
+import com.masgzy.anything.log.AppLogger
 import com.masgzy.anything.ui.DirectoryScreen
 import com.masgzy.anything.ui.FloatingBottomBar
 import com.masgzy.anything.ui.LocalFloatingBarPadding
@@ -52,6 +53,7 @@ import com.masgzy.anything.ui.SearchScreen
 import com.masgzy.anything.ui.SettingsScreen
 import com.masgzy.anything.ui.SyntaxHelpScreen
 import com.masgzy.anything.ui.WelcomeScreen
+import com.masgzy.anything.ui.log.LogScreen
 import com.masgzy.anything.ui.theme.AnythingTheme
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.blur.layerBackdrop
@@ -82,6 +84,7 @@ class MainActivity : ComponentActivity() {
         // 全局崩溃处理器必须最先安装（ImageToolbox GlobalExceptionHandler 同款模式）
         CrashReporter.install(applicationContext)
         super.onCreate(savedInstanceState)
+        AppLogger.i("AnythingApp", "activity create, savedInstanceState=${savedInstanceState != null}")
         enableEdgeToEdge()
         setContent {
             Root(
@@ -176,6 +179,7 @@ private fun MainShell(
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
     var showSyntaxHelp by rememberSaveable { mutableStateOf(false) }
+    var showLog by rememberSaveable { mutableStateOf(false) }
 
     // 底栏选中态跟随 settledPage（手势滑动时指示器同步，NPatch 同款）
     val settledPage by remember(pagerState) {
@@ -200,11 +204,12 @@ private fun MainShell(
     var barPadding by remember { mutableStateOf(88.dp + navInset) }
     val onBarHeight: (androidx.compose.ui.unit.Dp) -> Unit = { barPadding = it }
 
-    // 返回语义：教程页优先关闭；否则目录/设置 tab 平滑滚回搜索（与底栏语义一致）
-    BackHandler(enabled = settledPage != 0 && !showSyntaxHelp) {
+    // 返回语义：子页面优先关闭；否则目录/设置 tab 平滑滚回搜索（与底栏语义一致）
+    BackHandler(enabled = settledPage != 0 && !showSyntaxHelp && !showLog) {
         scope.launch { pagerState.animateScrollToPage(0) }
     }
     BackHandler(enabled = showSyntaxHelp) { showSyntaxHelp = false }
+    BackHandler(enabled = showLog) { showLog = false }
 
     // 底栏占位 padding 对整个壳生效（页面滚动尾部 contentPadding 消费它）
     CompositionLocalProvider(LocalFloatingBarPadding provides barPadding) {
@@ -228,6 +233,7 @@ private fun MainShell(
                     viewModel = viewModel,
                     onShowWelcome = onShowWelcome,
                     onOpenSyntaxHelp = { showSyntaxHelp = true },
+                    onOpenLog = { showLog = true },
                 )
                 else -> SearchScreen(
                     viewModel = viewModel,
@@ -237,7 +243,7 @@ private fun MainShell(
             }
         }
 
-        // —— 栈式子页面：语法教程（右侧滑入 / 反向滑出；盖住 Pager，底栏隐藏）——
+        // —— 栈式子页面：语法教程 / 调试日志（右侧滑入 / 反向滑出；盖住 Pager，底栏隐藏）——
         AnimatedContent(
             targetState = showSyntaxHelp,
             transitionSpec = {
@@ -259,9 +265,30 @@ private fun MainShell(
             }
         }
 
-        // —— 底栏（教程页打开时下沉隐藏，NPatch 栈页同款语义）——
+        // —— 栈式子页面：调试日志（同款转场）——
+        AnimatedContent(
+            targetState = showLog,
+            transitionSpec = {
+                if (targetState) {
+                    (slideInHorizontally(tween(300)) { it } + fadeIn(tween(200))) togetherWith
+                        fadeOut(tween(150))
+                } else {
+                    fadeIn(tween(180, delayMillis = 40)) togetherWith
+                        (slideOutHorizontally(tween(280)) { it } + fadeOut(tween(180)))
+                }
+            },
+            label = "logScreen",
+        ) { log ->
+            if (log) {
+                LogScreen(onBack = { showLog = false })
+            } else {
+                Box(Modifier.fillMaxSize())
+            }
+        }
+
+        // —— 底栏（任一栈页打开时下沉隐藏，NPatch 栈页同款语义）——
         androidx.compose.animation.AnimatedVisibility(
-            visible = !showSyntaxHelp,
+            visible = !showSyntaxHelp && !showLog,
             enter = fadeIn(tween(200)) + slideInVertically(tween(260)) { it / 2 },
             exit = fadeOut(tween(180)) + slideOutVertically(tween(220)) { it / 2 },
             modifier = Modifier.align(Alignment.BottomCenter),
