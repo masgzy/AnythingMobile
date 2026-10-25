@@ -101,13 +101,14 @@ jobs:
       # 重命名规则（offline 包加 _offline 后缀，与 release.yml 一致）：
       #   standard → AnythingMobile-<版本>-<abi>.apk
       #   offline  → AnythingMobile-<版本>-<abi>_offline.apk
+      # flavor 维度使产物分层：apk/<channel>/release/
       - name: 产物清单（统一重命名，offline 包加 _offline 后缀）
         run: |
           VERSION=$(sed -n 's/.*versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -1)
           echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
-          OUT=app/build/outputs/apk/release
-          mkdir -p "$OUT/renamed"
-          for f in "$OUT"/*.apk; do
+          ROOT=app/build/outputs/apk
+          mkdir -p "$ROOT/renamed"
+          for f in "$ROOT"/*/release/*-release.apk; do
             case "$f" in
               *arm64-v8a*)   ABI=arm64-v8a ;;
               *armeabi-v7a*) ABI=armeabi-v7a ;;
@@ -118,9 +119,9 @@ jobs:
               *offline*) SUFFIX="_offline" ;;
               *)         SUFFIX="" ;;
             esac
-            mv "$f" "$OUT/renamed/AnythingMobile-$VERSION-$ABI$SUFFIX.apk"
+            mv "$f" "$ROOT/renamed/AnythingMobile-$VERSION-$ABI$SUFFIX.apk"
           done
-          ls -lh "$OUT/renamed"
+          ls -lh "$ROOT/renamed"
 
       # upload-artifact v7 新能力：单文件直传（archive: false）。
       # 不打 zip 包，artifact 名 = 文件名，下载即得可安装的 APK 本体。
@@ -129,49 +130,49 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: app/build/outputs/apk/release/renamed/AnythingMobile-*-arm64-v8a.apk
+          path: app/build/outputs/apk/renamed/AnythingMobile-*-arm64-v8a.apk
 
       - name: 上传 armeabi-v7a APK（直传）
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: app/build/outputs/apk/release/renamed/AnythingMobile-*-armeabi-v7a.apk
+          path: app/build/outputs/apk/renamed/AnythingMobile-*-armeabi-v7a.apk
 
       - name: 上传 x86_64 APK（直传）
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: app/build/outputs/apk/release/renamed/AnythingMobile-*-x86_64.apk
+          path: app/build/outputs/apk/renamed/AnythingMobile-*-x86_64.apk
 
       - name: 上传 universal APK（直传）
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: app/build/outputs/apk/release/renamed/AnythingMobile-*-universal.apk
+          path: app/build/outputs/apk/renamed/AnythingMobile-*-universal.apk
 
       # offline 渠道四件套（文件名带 _offline 后缀，与 standard 通配符互斥）
       - name: 上传 arm64-v8a 离线版 APK（直传）
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: app/build/outputs/apk/release/renamed/AnythingMobile-*-arm64-v8a_offline.apk
+          path: app/build/outputs/apk/renamed/AnythingMobile-*-arm64-v8a_offline.apk
 
       - name: 上传 armeabi-v7a 离线版 APK（直传）
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: app/build/outputs/apk/release/renamed/AnythingMobile-*-armeabi-v7a_offline.apk
+          path: app/build/outputs/apk/renamed/AnythingMobile-*-armeabi-v7a_offline.apk
 
       - name: 上传 x86_64 离线版 APK（直传）
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: app/build/outputs/apk/release/renamed/AnythingMobile-*-x86_64_offline.apk
+          path: app/build/outputs/apk/renamed/AnythingMobile-*-x86_64_offline.apk
 
       - name: 上传 universal 离线版 APK（直传）
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: app/build/outputs/apk/release/renamed/AnythingMobile-*-universal_offline.apk
+          path: app/build/outputs/apk/renamed/AnythingMobile-*-universal_offline.apk
 
 
