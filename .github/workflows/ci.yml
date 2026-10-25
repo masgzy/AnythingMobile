@@ -92,7 +92,7 @@ jobs:
           restore-keys: gradle-${{ runner.os }}-
 
       - name: Kotlin 单元测试（旧格式解析回归网，debug 变体 —— AGP 9 无 release 单测任务）
-        run: ./gradlew :app:testDebugUnitTest --no-daemon
+        run: ./gradlew :app:testStandardDebugUnitTest --no-daemon
 
       # 双渠道（alpha26）：standard + offline 两条 R8 流水线，与 release.yml 同构
       - name: 构建双渠道签名 APK（standard + offline，各多 ABI + universal）
