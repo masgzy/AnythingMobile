@@ -74,9 +74,20 @@ startScan(optionsJson)
        │    ├─ 目录过滤：.开头 / LOST.DIR / Android/{data,obb}
        │    ├─ 批量入 NameIndex（每目录一次写锁，锁竞争摊薄一个数量级）
        │    └─ 文档（≤20MB）→ 入队解析流水线（独立 worker 池攒批 32 条提交）
+       │       变更文档的旧全文删除也在本阶段攒批（单次 commit，alpha26）
        ├─ 遍历结束 → 等待解析流水线排空
-       └─ finishScan: 增量 RemoveExcept → 异步快照落盘 → OnFinished(statsJSON)
+       └─ finishScan: 增量 RemoveExcept → 异步快照落盘（记录导出也在
+          落盘线程内，alpha26）→ OnFinished(statsJSON)
 ```
+
+索引范围（alpha26 三模式，宿主侧 AppViewModel 决定 roots）：
+
+- **仅全盘**：roots = 共享存储根（历史默认语义）；
+- **仅目录**：roots = 已授权目录的物理路径；不可映射时走 SAF 注入；
+- **全盘+目录**：全盘扫描之外，「同步索引」对目录清单中不可物理映射的
+  DocumentsProvider 虚拟目录（部分应用的文件提供器只经此暴露内容）
+  逐个 SAF 遍历 + Ingest 注入；Android/data 特权条目（alpha26 自设置页
+  迁入「目录」页）经 Shizuku/Stellar 枚举后走 replaceExternalEntries。
 
 ### 搜索流程
 
@@ -169,14 +180,18 @@ tantivy 独占锁由 writer 创建阶段获取 —— 同目录双开会创建�
 `.github/workflows/ci.yml`：
 
 1. `cargo fmt --check` + `cargo clippy --all-targets -- -D warnings` + `cargo test`
-   （Rust 引擎 119 用例，无需安卓环境）
+   （Rust 引擎 121 用例，无需安卓环境；vendor/pdf-extract 的 lint 由
+   cargo 的 cap-lints 机制自动豁免）
 2. `./engine/build-so.sh`（cargo-ndk 三 ABI 交叉编译 + 16KB 对齐校验，
    .so 直出 `app/src/main/jniLibs/<abi>/`）
-3. `./gradlew :app:assembleRelease`（Gradle Wrapper 随仓库分发，版本锁定 9.7.1，可复现构建）
-4. 产物上传：多 ABI + universal 签名 release APK（4 份单文件直传）
+3. `./gradlew :app:testDebugUnitTest` + 双渠道 release 构建
+   （`:app:assembleStandardRelease :app:assembleOfflineRelease`，alpha26）
+4. 产物上传：standard + offline 各多 ABI + universal 签名 APK（8 份单文件直传，
+   offline 包文件名带 `_offline` 后缀）
 
 `emulator.yml`：模拟器冒烟 + 仪器化测试（JNI 加载/引擎构造/扫描链路）；
-`release.yml`：tag 触发，Rust 测试把关后构建并发布 APK。
+`release.yml`：tag 触发，Rust 测试把关后构建双渠道 APK 并发布
+（offline 包名 `AnythingMobile-<版本>-<abi>_offline.apk`）。
 
 ## 7. 里程碑
 

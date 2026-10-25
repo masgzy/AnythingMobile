@@ -32,6 +32,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -52,9 +53,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.masgzy.anything.AppViewModel
+import com.masgzy.anything.data.IndexScope
 import com.masgzy.anything.data.IndexStats
 import com.masgzy.anything.data.SafDirs
 import com.masgzy.anything.data.ScanPhase
+import com.masgzy.anything.data.ShizukuAccess
 
 /**
  * 「目录」tab —— SAF 文件夹选择器授权的搜索目录管理（alpha19 重设计）。
@@ -89,6 +92,8 @@ fun DirectoryScreen(
     val repoState by viewModel.repo.state.collectAsStateWithLifecycle()
     val scanning = repoState.phase != ScanPhase.IDLE
     val indexStats by viewModel.indexStats.collectAsStateWithLifecycle()
+    val shizukuState by viewModel.shizukuState.collectAsStateWithLifecycle()
+    val externalCount by viewModel.externalCount.collectAsStateWithLifecycle()
 
     val pickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -160,7 +165,7 @@ fun DirectoryScreen(
                         icon = painterResource(R.drawable.ic_search),
                         title = "去搜索",
                         desc = "切到「搜索」页输入关键词即可命中目录内文件；" +
-                            "配合顶栏「仅搜索选定目录」开关可切换全盘/限定范围",
+                            "配合下方「索引范围」可切换全盘/限定范围",
                     )
                     Spacer(Modifier.height(6.dp))
                 }
@@ -193,30 +198,34 @@ fun DirectoryScreen(
                 }
             }
 
-            // ---- 范围开关 ----
+            // ---- 索引范围（alpha26 三模式，替代旧的“仅搜索选定目录”开关） ----
             item(key = "scope") {
                 GroupCard {
-                    ListItem(
-                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                        headlineContent = { Text("仅搜索选定目录") },
-                        supportingContent = {
-                            Text(
-                                "开启后搜索只覆盖上方授权的目录；" +
-                                    "关闭则全盘扫描（此时本页目录仅作授权记录）。",
-                            )
-                        },
-                        trailingContent = {
-                            Switch(
-                                checked = settings.scopedSearchOnly,
-                                onCheckedChange = { viewModel.setScopedSearchOnly(it) },
-                            )
-                        },
+                    ScopeRow(
+                        title = "全盘 + 目录",
+                        desc = "全盘扫描之外，同步时还经文件提供器收录下方授权目录\n中不可直接映射的虚拟目录（如部分应用私有下载区）",
+                        selected = settings.indexScope == IndexScope.FULL_DISK_AND_DIRS,
+                        onClick = { viewModel.setIndexScope(IndexScope.FULL_DISK_AND_DIRS) },
+                    )
+                    GroupDivider()
+                    ScopeRow(
+                        title = "仅目录",
+                        desc = "只索引下方授权的目录，其余存储位置不参与搜索",
+                        selected = settings.indexScope == IndexScope.DIRS_ONLY,
+                        onClick = { viewModel.setIndexScope(IndexScope.DIRS_ONLY) },
+                    )
+                    GroupDivider()
+                    ScopeRow(
+                        title = "仅全盘",
+                        desc = "扫描整个共享存储；下方目录仅作授权记录（历史默认）",
+                        selected = settings.indexScope == IndexScope.FULL_DISK_ONLY,
+                        onClick = { viewModel.setIndexScope(IndexScope.FULL_DISK_ONLY) },
                     )
                 }
             }
 
-            // ---- 目录列表 ----
-            if (settings.searchDirs.isEmpty()) {
+            // ---- 目录列表（含 Android/data 特权条目：与添加目录同列的入口） ----
+            if (settings.searchDirs.isEmpty() && !settings.scanAndroidData) {
                 item(key = "empty") {
                     Column(
                         Modifier
@@ -231,10 +240,10 @@ fun DirectoryScreen(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(Modifier.height(12.dp))
-                        Text("还没有授权任何目录", fontWeight = FontWeight.Medium)
+                        Text("还没有纳入任何目录", fontWeight = FontWeight.Medium)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "点上方「添加目录」，在系统文件夹选择器中\n选择并授权，即可纳入搜索范围。",
+                            "点上方「添加目录」，在系统文件夹选择器中选择\n并授权；或打开下方 Android/data 条目。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -243,7 +252,11 @@ fun DirectoryScreen(
             } else {
                 item(key = "dirs-title") {
                     SectionHeader(
-                        if (settings.scopedSearchOnly) "已授权目录（参与搜索）" else "已授权目录（仅记录）",
+                        when (settings.indexScope) {
+                            IndexScope.DIRS_ONLY -> "已纳入目录（参与搜索）"
+                            IndexScope.FULL_DISK_AND_DIRS -> "已纳入目录（补充收录）"
+                            IndexScope.FULL_DISK_ONLY -> "已纳入目录（仅记录）"
+                        },
                     )
                 }
                 item(key = "dirs") {
@@ -255,6 +268,16 @@ fun DirectoryScreen(
                                 onRemove = { viewModel.removeSearchDir(uriStr) },
                             )
                         }
+                        if (settings.searchDirs.isNotEmpty()) GroupDivider()
+                        // Android/data：与普通目录同列的条目（alpha26 自设置页迁入）
+                        AndroidDataRow(
+                            enabled = settings.scanAndroidData,
+                            shizukuStatus = shizukuState.status,
+                            externalCount = externalCount,
+                            onToggle = { viewModel.setAndroidDataEnabled(it) },
+                            onRequestPermission = { viewModel.requestShizukuPermission() },
+                            onOpenDownload = { viewModel.openShizukuDownload() },
+                        )
                     }
                 }
             }
@@ -276,7 +299,10 @@ fun DirectoryScreen(
                     ) {
                         Icon(painterResource(R.drawable.ic_manage_search), null, Modifier.size(18.dp))
                         Text(
-                            if (settings.scopedSearchOnly) "同步选定目录" else "重建全盘索引",
+                            when (settings.indexScope) {
+                                IndexScope.DIRS_ONLY -> "同步选定目录"
+                                else -> "重建全盘索引"
+                            },
                             modifier = Modifier.padding(start = 6.dp),
                         )
                     }
@@ -308,7 +334,8 @@ fun DirectoryScreen(
                         Text(
                             "授权信息保存在本机（系统级持久授权 + 目录列表），" +
                                 "移除应用后失效。SAF 遍历通道每次同步为整体重建，" +
-                                "目录内容量大时建议保持「所有文件访问」授权以走高速管线。",
+                                "目录内容量大时建议保持「所有文件访问」授权以走高速管线。" +
+                                "索引没有条目数上限，收录量只取决于磁盘内容。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -356,6 +383,86 @@ private fun DirectoryRow(uriStr: String, onRemove: () -> Unit) {
     LaunchedEffect(uriStr) {
         valid = SafDirs.isValid(context, uriStr)
     }
+}
+
+/** 三选一的范围单选行（GroupCard 内使用：RadioButton + 标题/说明）。 */
+@Composable
+private fun ScopeRow(title: String, desc: String, selected: Boolean, onClick: () -> Unit) {
+    ListItem(
+        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+        leadingContent = {
+            RadioButton(selected = selected, onClick = onClick)
+        },
+        headlineContent = {
+            Text(
+                title,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                color = if (selected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurface,
+            )
+        },
+        supportingContent = { Text(desc) },
+        modifier = Modifier.clickable(onClick = onClick),
+    )
+}
+
+/**
+ * Android/data 特权收录条目（alpha26 自设置页"扫描 Android/data 目录"
+ * 开关迁入，与"添加目录"同列）：开关即收录/移除；未授权时点按引导授权。
+ */
+@Composable
+private fun AndroidDataRow(
+    enabled: Boolean,
+    shizukuStatus: ShizukuAccess.Status,
+    externalCount: Int,
+    onToggle: (Boolean) -> Unit,
+    onRequestPermission: () -> Unit,
+    onOpenDownload: () -> Unit,
+) {
+    ListItem(
+        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+        leadingContent = {
+            Icon(
+                painterResource(R.drawable.ic_folder_special),
+                null,
+                tint = if (enabled) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        headlineContent = { Text("Android/data（应用数据目录）") },
+        supportingContent = {
+            Text(
+                when {
+                    enabled && shizukuStatus == ShizukuAccess.Status.GRANTED ->
+                        "已收录 $externalCount 项 · 仅文件名不含全文"
+                    enabled && shizukuStatus == ShizukuAccess.Status.NEED_PERMISSION ->
+                        "已开启 · 点此发起 Shizuku / Stellar 授权"
+                    enabled -> "已开启 · 但 Shizuku / Stellar 未运行，点此前往下载"
+                    else -> "开启后经 Shizuku / Stellar 特权收录（Android 11+ 隔离区）"
+                },
+            )
+        },
+        trailingContent = {
+            Switch(
+                checked = enabled,
+                onCheckedChange = { on ->
+                    when {
+                        !on -> onToggle(false)
+                        shizukuStatus == ShizukuAccess.Status.GRANTED -> onToggle(true)
+                        else -> {
+                            // 未授权：先开启（状态记忆），再引导授权/下载
+                            onToggle(true)
+                            if (shizukuStatus == ShizukuAccess.Status.NOT_RUNNING) {
+                                onOpenDownload()
+                            } else {
+                                onRequestPermission()
+                            }
+                        }
+                    }
+                },
+            )
+        },
+    )
 }
 
 /** 三步引导行：数字圆徽 + 图标 + 标题/说明。 */

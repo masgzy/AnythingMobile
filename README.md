@@ -27,7 +27,7 @@
 |------|------|
 | 三页签搜索 | 文件名 / office 文档正文 / 目录名，与原版 Anything 一致 |
 | 底栏导航 | 搜索 / 目录 / 设置三页切换；悬浮胶囊底栏（默认开启，NPatch 同款），液态玻璃质感可开（Android 13+，背景实时模糊 + 折射高光） |
-| 自选搜索目录 | 系统文件夹选择器（SAF / 文件提供器 API）授权任意目录纳入索引；「仅搜索选定目录」开启后索引只覆盖已授权目录 |
+| 自选搜索目录 | 系统文件夹选择器（SAF / 文件提供器 API）授权任意目录纳入索引；索引范围三模式可选：**全盘+目录** / **仅目录** / **仅全盘**（alpha26） |
 | 文件名秒搜 | 2-gram 倒排索引，边输入边出结果 |
 | 文档全文搜索 | docx / xlsx / pptx / pdf 正文内容也能搜；旧版 .doc / .xls / .ppt / .wps 由内置解析器兜底 |
 | 持久化全文索引 | tantivy + jieba 中文分词的倒排索引落盘应用私有目录，启动秒级恢复，正文不再占用运行内存 |
@@ -37,9 +37,9 @@
 | 结果管理 | 点击看详情（位置/大小/时间）、直接打开或发送，长按多选批量删除 |
 | 外观设置 | 主题模式（跟随系统/浅色/深色）、动态取色开关、12 色主题色板、AMOLED 纯黑（对齐 ImageToolbox） |
 | 快捷磁贴 | 下拉通知栏点击磁贴，一键直达搜索 |
-| Android/data 扫描 | 借助 Shizuku / Stellar 特权通道收录应用数据目录（Android 11+ 隔离区）的文件名与目录名，设置内开关 + 授权按钮 |
+| Android/data 扫描 | 借助 Shizuku / Stellar 特权通道收录应用数据目录（Android 11+ 隔离区）的文件名与目录名；alpha26 起入口在「目录」页，与添加目录同列的一个条目 |
 | 调试日志 | 设置内可切换记录等级（Verbose~Error），日志页筛选查看、一键导出分享，用于远程问题定位 |
-| 检查更新 | 应用内检查新版本（GitHub Releases API）：手动点击「版本」项或开启启动自动检查，发现更新弹出更新日志并跳转下载页；关于页可直达 GitHub 仓库 |
+| 检查更新 | 应用内检查新版本（GitHub Releases API）：手动点击「版本」项或开启启动自动检查，发现更新弹出更新日志并跳转下载页；关于页可直达 GitHub 仓库。另有**离线版**（下表 `_offline` 后缀）：彻底不做检查更新、连 INTERNET 权限都不声明 |
 | 纯本地索引 | 索引/搜索/解析零网络请求，数据不出设备；INTERNET 权限仅用于检查更新（GitHub API），无任何遥测 |
 
 ## 为什么是 Rust
@@ -48,7 +48,7 @@ alpha20 起搜索引擎内核由 Go（bleve + gse，经 gomobile 打包）整体
 
 | 维度 | Go/gomobile（≤alpha19） | Rust（alpha20 起） |
 |------|------------------------|-------------------|
-| 引擎单 ABI 体积 | ~10MB（Go runtime 下限） | **~3.2MB**（gzip 后，含 tantivy + jieba 词典） |
+| 引擎单 ABI 体积 | ~10MB（Go runtime 下限） | **~7.1MB**（APK 内不压缩存储、mmap 直载，alpha25 实测 7.06MB；不压缩以保证零解压加载延迟与 16KB 对齐） |
 | JNI 调用 | 经 gobind 桥接层转发 | 直连 FFI，µs 级进入引擎 |
 | 全文索引 | bleve scorch + gse | tantivy + jieba（词典同源，分词口径一致） |
 | 索引期内存 | 峰值可达数百 MB | 显著下降（tantivy 分段写入 + 攒批提交） |
@@ -73,6 +73,7 @@ alpha20 起搜索引擎内核由 Go（bleve + gse，经 gomobile 打包）整体
 | `AnythingMobile-…-armeabi-v7a.apk` | 更早期的 32 位手机 |
 | `AnythingMobile-…-x86_64.apk` | 模拟器 / ChromeOS 设备 |
 | `AnythingMobile-…-universal.apk` | 不确定就选它，通吃所有机型（体积稍大） |
+| `AnythingMobile-…-<abi>_offline.apk` | **离线版**（alpha26）：不检查更新、不声明 INTERNET 权限，适合不愿让应用具备联网能力的用户；与标准版同 applicationId，可直接覆盖互装 |
 
 > **升级提示**：v1.0.0-alpha12 起改用正式证书签名，此后可覆盖升级；
 > 从 alpha11 及更早版本升级需先卸载旧版。
@@ -104,16 +105,22 @@ alpha20 起搜索引擎内核由 Go（bleve + gse，经 gomobile 打包）整体
 Android 11+ 把 `/sdcard/Android/data` 对普通应用隔离，需借助特权框架：
 
 1. 安装并启动 [Shizuku](https://shizuku.rikka.app/download/) 或 [Stellar](https://github.com/roro2239/Stellar)（无线调试或 Root 启动均可）；
-2. 进入应用「设置 → 扩展扫描」，打开「扫描 Android/data 目录」；
-3. 点击「Shizuku / Stellar 授权」发起授权，成功后自动枚举并收录（仅文件名/目录名，不含全文；点击 Android/data 命中项会先导出副本再打开）。
+2. 进入应用「目录」页，打开列表里的「Android/data（应用数据目录）」条目（alpha26 起自设置页迁入，与添加目录同列）；首次开启会引导 Shizuku / Stellar 授权；
+3. 授权成功后自动枚举并收录（仅文件名/目录名，不含全文；点击 Android/data 命中项会先导出副本再打开）。
 
 ## 常见问题
 
 **为什么要"所有文件访问"权限？**
-全盘搜索必须读取每个文件的元数据与内容。本应用没有声明 INTERNET 权限
-（可在 AndroidManifest.xml 中验证，安装后也可在系统应用信息里查看权限列表），
-所有数据 100% 保留在你的设备上。系统云备份 / 设备迁移同样不会带走任何数据：
+全盘搜索必须读取每个文件的元数据与内容。所有数据 100% 保留在你的设备上：
+索引/搜索/解析零网络请求，唯一用到网络的是**检查更新**（GitHub Releases API，
+仅在你点击或开启自动检查时发生，可在 AndroidManifest.xml 与系统权限列表中验证）。
+如果连这一点也不想要：Releases 页的 `_offline` 离线版连 INTERNET 权限都不声明，
+应用在系统层面就不具备联网能力。系统云备份 / 设备迁移同样不会带走任何数据：
 应用已声明 `allowBackup=false`，索引快照与全文索引只存在于本机私有目录。
+
+**索引有条目数上限吗？**
+没有。"已收录 N 项"是引擎实际计数（内存态名称索引 + 全文库之和的文件数），
+不存在硬编码上限；收录量只取决于磁盘内容与设备内存（十万级条目约占 10~20MB）。
 
 **能搜索旧版 Office（.doc / .xls / .ppt）的内容吗？**
 能。应用内置了旧版二进制格式的解析器（Kotlin 层实现，无需任何额外权限与组件），
@@ -145,6 +152,8 @@ Android 11+ 把 `/sdcard/Android/data` 对普通应用隔离，需借助特权�
 - [x] M3 持久化全文索引 + PDF 文本抽取（alpha14）：正文落盘不占运行内存，升级旧快照自动重建全文
 - [x] M4 搜索语法 `type:` / `dir:` 过滤 + 全文命中相关性排序（alpha14）
 - [x] M5 Rust FFI 迁移：引擎整体换用 Rust（tantivy + jieba），APK 体积与索引内存大幅下降（alpha20）
+- [x] 应用内检查更新 + 关于页跳仓库（alpha24）；中文 PDF UniGB-UCS2 盲区修复（vendor 补丁，alpha24）；Material Symbols 图标迁移（alpha25）
+- [x] 索引范围三模式（全盘+目录 / 仅目录 / 仅全盘）+ Android/data 目录条目化 + 离线版发行渠道（alpha26）
 - [ ] 后续：体验打磨、F-Droid 分发、应用内删除 Android/data 文件（Shizuku）
 
 ## 致谢
@@ -168,7 +177,7 @@ Android 11+ 把 `/sdcard/Android/data` 对普通应用隔离，需借助特权�
   ./gradlew :app:assembleDebug  # Gradle Wrapper 已入库（9.7.1），产出多 ABI + universal APK
   ```
 
-- 引擎单测：`cd engine && cargo test`（119 个用例：索引/搜索/解析/快照/并发契约）
+- 引擎单测：`cd engine && cargo test`（121 个用例：索引/搜索/解析/快照/并发契约）
 - 核心依赖均为宽松许可证，与本项目 GPL-3.0 完全兼容：
   tantivy (MIT) · jieba-rs (MIT) · zip (MIT) · pdf-extract (MIT/Apache-2.0) · flate2 (MIT/Apache-2.0) · jni (MIT/Apache-2.0) · serde (MIT/Apache-2.0)
 - 欢迎通过 Issue 与 PR 参与贡献；提交后 CI 自动完成引擎测试与全架构构建。

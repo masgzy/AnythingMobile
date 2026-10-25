@@ -194,12 +194,25 @@ pub fn spawn_save(
     ext_names: Vec<NameRec>,
     ext_dirs: Vec<NameRec>,
 ) {
+    spawn_save_lazy(gate, data_dir, move || (names, dirs, ext_names, ext_dirs));
+}
+
+/// 异步落盘（延迟导出变体，alpha26）：把记录导出（上万条目时是
+/// 全表遍历 + 字符串克隆，可达上百毫秒）一并移入落盘线程执行，
+/// 扫描收尾的关键路径（OnFinished 通知）只负责注册门与启动线程。
+/// 闭包内持有引擎 Arc，执行时机由 SaveGate 串行化保证：下一次
+/// StartScan 会先 wait 上一次落盘完成，导出看到的是稳定状态。
+pub fn spawn_save_lazy<F>(gate: Arc<SaveGate>, data_dir: String, export: F)
+where
+    F: FnOnce() -> (Vec<NameRec>, Vec<NameRec>, Vec<NameRec>, Vec<NameRec>) + Send + 'static,
+{
     gate.begin();
     let gate_in_thread = Arc::clone(&gate);
     let spawned = std::thread::Builder::new()
         .name("anything-snapshot".to_string())
         .spawn(move || {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let (names, dirs, ext_names, ext_dirs) = export();
                 let _ = save_snapshot(&data_dir, &names, &dirs, &ext_names, &ext_dirs);
             }));
             gate_in_thread.end();

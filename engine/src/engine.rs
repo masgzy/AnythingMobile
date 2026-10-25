@@ -362,7 +362,9 @@ impl EngineImpl {
 
     /// 统一收尾（Go finishScan 同序）：增量模式下移除"本次遍历未见到"的
     /// 已删除条目、复位标志、异步落盘快照、通知完成。
-    fn finish_scan(&self, mode: &str, cancelled: bool) {
+    /// 接收 `&Arc<Self>`（alpha26）：落盘改为延迟导出变体，闭包需捕获
+    /// 引擎 Arc 在落盘线程内导出记录，避免上万条目同步导出阻塞收尾。
+    fn finish_scan(self: &Arc<Self>, mode: &str, cancelled: bool) {
         let incremental = mode == "incremental";
         if incremental && !cancelled {
             let seen = {
@@ -381,15 +383,20 @@ impl EngineImpl {
         self.scanning.store(false, Ordering::Release);
         self.invalidate_search_cache(); // 收尾清理后，旧结果一律失效
         // 先注册并启动异步落盘，再通知完成事件：保证宿主看到 OnFinished
-        // 时落盘任务已在册（Go 同款顺序）。
+        // 时落盘任务已在册（Go 同款顺序）。记录导出移入落盘线程（alpha26）。
         if !cancelled && !self.data_dir.is_empty() {
-            crate::persist::spawn_save(
+            let engine = Arc::clone(self);
+            crate::persist::spawn_save_lazy(
                 Arc::clone(&self.save_gate),
                 self.data_dir.clone(),
-                self.names.export_records(),
-                self.dirs.export_records(),
-                self.ext_names.export_records(),
-                self.ext_dirs.export_records(),
+                move || {
+                    (
+                        engine.names.export_records(),
+                        engine.dirs.export_records(),
+                        engine.ext_names.export_records(),
+                        engine.ext_dirs.export_records(),
+                    )
+                },
             );
         }
         let stats = self.current_stats(cancelled);
@@ -467,6 +474,13 @@ impl EngineImpl {
             .collect();
         self.names.add_batch(&records);
 
+        // 变更/新增文档统一入解析流水线；旧全文的移除**攒批一次 commit**
+        //（alpha26：旧实现逐条 content.remove，N 个变更文档 = N 次 tantivy
+        // commit + reader.reload，Android flash 上单次 commit 可达百毫秒级，
+        // 是增量扫描"明明只改了几个文件却慢 1~2 秒"的主要来源之一。
+        // upsert 语义下解析完成的 add_batch 本就先 delete 后 add，
+        // 预删除只影响瞬时容量计数，攒批后一次性移除即可）。
+        let mut stale_paths: Vec<String> = Vec::new();
         for it in &adds {
             if !it.parse {
                 continue;
@@ -475,10 +489,12 @@ impl EngineImpl {
             if it.size > MAX_PARSE_SIZE as i64 || it.size == 0 {
                 continue;
             }
-            // 变更文件先移除旧全文，避免占双份容量；
-            // 解析交给流水线（入队非阻塞，不拖慢遍历线程）。
-            self.content.remove(&it.path);
+            stale_paths.push(it.path.clone());
+            // 解析交给流水线（入队非阻塞，不拖慢遍历线程）
             self.enqueue_parse(&it.path, &crate::textutil::ext_of(&it.path));
+        }
+        if !stale_paths.is_empty() {
+            self.content.remove_batch(&stale_paths);
         }
     }
 
@@ -800,15 +816,20 @@ impl EngineImpl {
         self.invalidate_search_cache();
 
         self.scanning.store(false, Ordering::Release);
-        // 收尾与扫描同路径：异步落盘（失败不影响注入结果）
+        // 收尾与扫描同路径：异步落盘（失败不影响注入结果）；导出移入落盘线程
         if !self.data_dir.is_empty() {
-            crate::persist::spawn_save(
+            let engine = Arc::clone(self);
+            crate::persist::spawn_save_lazy(
                 Arc::clone(&self.save_gate),
                 self.data_dir.clone(),
-                self.names.export_records(),
-                self.dirs.export_records(),
-                self.ext_names.export_records(),
-                self.ext_dirs.export_records(),
+                move || {
+                    (
+                        engine.names.export_records(),
+                        engine.dirs.export_records(),
+                        engine.ext_names.export_records(),
+                        engine.ext_dirs.export_records(),
+                    )
+                },
             );
         }
         // OnFinished 异步化：Ingest 在调用方线程同步执行，若同步通知，
@@ -896,7 +917,8 @@ impl EngineImpl {
     }
 
     /// 用宿主提供的完整清单替换外部扩展索引（全量替换语义）。
-    pub fn replace_external_entries(&self, feed_json: &str) -> EngineResult<()> {
+    /// 接收 `&Arc<Self>`（alpha26）：落盘改为延迟导出变体（同 finish_scan）。
+    pub fn replace_external_entries(self: &Arc<Self>, feed_json: &str) -> EngineResult<()> {
         let feed: crate::types::ExternalFeed = serde_json::from_str(feed_json).map_err(|_| {
             EngineError::new(r#"core: feedJSON 非法，应为 {"root":...,"dirs":[...],"files":[...]}"#)
         })?;
@@ -921,13 +943,18 @@ impl EngineImpl {
         }
 
         if !self.data_dir.is_empty() {
-            crate::persist::spawn_save(
+            let engine = Arc::clone(self);
+            crate::persist::spawn_save_lazy(
                 Arc::clone(&self.save_gate),
                 self.data_dir.clone(),
-                self.names.export_records(),
-                self.dirs.export_records(),
-                self.ext_names.export_records(),
-                self.ext_dirs.export_records(),
+                move || {
+                    (
+                        engine.names.export_records(),
+                        engine.dirs.export_records(),
+                        engine.ext_names.export_records(),
+                        engine.ext_dirs.export_records(),
+                    )
+                },
             );
         }
         Ok(())

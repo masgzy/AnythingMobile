@@ -8,8 +8,10 @@ import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.masgzy.anything.BuildConfig
 import com.masgzy.anything.data.AppSettings
 import com.masgzy.anything.data.EngineRepository
+import com.masgzy.anything.data.IndexScope
 import com.masgzy.anything.data.IndexStats
 import com.masgzy.anything.data.ScanPhase
 import com.masgzy.anything.data.ScanSummary
@@ -158,7 +160,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             setSortByName(next.sortByName)
             setShowPaginator(next.showPaginator)
             setLiquidGlass(next.liquidGlass)
-            setScopedSearchOnly(next.scopedSearchOnly)
+            setIndexScope(next.indexScope)
             setSearchDirs(next.searchDirs)
             setLogLevel(next.logLevel)
             setAutoCheckUpdates(next.autoCheckUpdates)
@@ -176,8 +178,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** 液态玻璃底栏（悬浮形态 + Android 13+ 才完整生效）。 */
     fun setLiquidGlass(v: Boolean) = updateSettings { s -> s.copy(liquidGlass = v) }
 
-    /** 搜索范围：仅选定目录 / 全盘。 */
-    fun setScopedSearchOnly(v: Boolean) = updateSettings { s -> s.copy(scopedSearchOnly = v) }
+    /** 索引/搜索范围：全盘+目录 / 仅目录 / 仅全盘（alpha26 三模式）。 */
+    fun setIndexScope(v: IndexScope) = updateSettings { s -> s.copy(indexScope = v) }
 
     // ---- 索引更新 ----
 
@@ -204,23 +206,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // engine.startScan 本身也涉及跨界调用，均不回占主线程
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
-                // 搜索范围 = 仅选定目录且全部可映射为物理路径：只扫这些根
-                //（复用常规遍历/解析管线，增量语义不变）；存在不可映射目录
-                // 时索引由 SAF 注入通道负责（目录页手动同步），此处不动
                 val s = _settings.value
-                if (s.scopedSearchOnly && s.searchDirs.isNotEmpty()) {
-                    val mapped = s.searchDirs.map { SafDirs.treeToPath(context, it) }
-                    if (mapped.all { it != null }) {
-                        repo.startScan(mapped.filterNotNull().toTypedArray(), incremental)
-                        return@runCatching
+                when (s.indexScope) {
+                    // 仅目录：全部可映射为物理路径时只扫这些根（复用常规
+                    // 遍历/解析管线，增量语义不变）；存在不可映射目录时
+                    // 索引由 SAF 注入通道负责（目录页手动同步），此处不动
+                    IndexScope.DIRS_ONLY -> {
+                        if (s.searchDirs.isNotEmpty()) {
+                            val mapped = s.searchDirs.map { SafDirs.treeToPath(context, it) }
+                            if (mapped.all { it != null }) {
+                                repo.startScan(mapped.filterNotNull().toTypedArray(), incremental)
+                                return@runCatching
+                            }
+                            if (!StoragePermissions.hasStorageAccess(context) ||
+                                mapped.any { it == null }
+                            ) {
+                                return@runCatching // SAF 通道管理的索引，不按全盘重建覆盖
+                            }
+                        }
+                        // 仅目录但目录清单为空：无可扫范围，不启动全盘兜底
+                        repo.setStatusText("尚未授权任何目录，请先在「目录」页添加")
                     }
-                    if (!StoragePermissions.hasStorageAccess(context) ||
-                        mapped.any { it == null }
-                    ) {
-                        return@runCatching // SAF 通道管理的索引，不按全盘重建覆盖
-                    }
+                    // 仅全盘 / 全盘+目录：常规扫描均按全盘根进行；差异在
+                    // 「同步索引」是否额外 SAF 注入虚拟目录（见 syncDirIndex），
+                    // 与 Android/data 特权条目的收录联动无关
+                    IndexScope.FULL_DISK_ONLY, IndexScope.FULL_DISK_AND_DIRS ->
+                        repo.startScan(StoragePermissions.scanRoots(context), incremental)
                 }
-                repo.startScan(StoragePermissions.scanRoots(context), incremental)
             }
         }
     }
@@ -243,40 +255,83 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 目录页"同步索引"：作用域开关决定语义 ——
-     *  - 仅选定目录：全部可映射且已授所有文件访问 → 常规扫描（快）；
-     *    否则 SAF 遍历 + Ingest 注入（content:// 的唯一通路）；
-     *  - 全盘：等同常规增量扫描（目录清单仅作为授权记录保留）。
+     * 目录页"同步索引"，按索引范围三模式分流（alpha26）：
+     *  - 仅全盘：等同常规全量重建（快）；
+     *  - 仅目录：全部可映射且已授所有文件访问 → 常规扫描；否则 SAF 遍历 +
+     *    Ingest 注入（content:// 的唯一通路）；
+     *  - 全盘+目录：先全盘重建，再对目录清单中不可物理映射的目录
+     *    （DocumentsProvider 虚拟目录，全盘扫描覆盖不到）逐个 SAF 注入；
+     *    可映射目录已被全盘覆盖，跳过以免重复遍历。
      */
     fun syncDirIndex() {
         val context = getApplication<Application>()
         val s = _settings.value
         if (repo.state.value.phase != com.masgzy.anything.data.ScanPhase.IDLE) return
-        if (!s.scopedSearchOnly) {
-            startScan(incremental = false)
-            return
-        }
-        if (s.searchDirs.isEmpty()) {
-            repo.setStatusText("尚未授权任何目录")
-            return
+        when (s.indexScope) {
+            IndexScope.FULL_DISK_ONLY -> {
+                startScan(incremental = false)
+                return
+            }
+            IndexScope.DIRS_ONLY -> if (s.searchDirs.isEmpty()) {
+                repo.setStatusText("尚未授权任何目录")
+                return
+            }
+            IndexScope.FULL_DISK_AND_DIRS -> if (s.searchDirs.isEmpty()) {
+                startScan(incremental = false)
+                return
+            }
         }
         viewModelScope.launch(Dispatchers.IO) {
             val mapped = s.searchDirs.map { SafDirs.treeToPath(context, it) }
-            if (mapped.all { it != null } && StoragePermissions.hasStorageAccess(context)) {
-                repo.startScan(mapped.filterNotNull().toTypedArray(), incremental = false)
-            } else {
-                repo.setStatusText("正在遍历目录…")
-                val json = SafDirs.collectEntries(
-                    context,
-                    s.searchDirs,
-                    extractDoc = { name, bytes -> repo.extractDoc(name, bytes) },
-                    onProgress = { n -> repo.setStatusText("已收录 $n 项…") },
-                )
-                if (json == null) {
-                    repo.setStatusText("目录授权已失效，请重新添加")
-                } else if (!repo.ingest(json)) {
-                    repo.setStatusText("引擎忙，稍后再试")
+            val fullDiskOk = StoragePermissions.hasStorageAccess(context)
+            val allMapped = mapped.all { it != null }
+            // 1) 常规管线段：可全盘则全盘重建；仅目录模式且全部可映射则只扫目录
+            val scannedPhysical = if (s.indexScope == IndexScope.FULL_DISK_AND_DIRS && fullDiskOk) {
+                repo.startScan(StoragePermissions.scanRoots(context), incremental = false)
+                // 等本轮扫描结束再注入（引擎扫描互斥，Ingest 在扫描中会被拒绝）
+                while (repo.state.value.phase != com.masgzy.anything.data.ScanPhase.IDLE) {
+                    delay(200)
                 }
+                true
+            } else if (allMapped) {
+                val roots = mapped.filterNotNull().toTypedArray()
+                if (roots.isNotEmpty()) {
+                    repo.startScan(roots, incremental = false)
+                    while (repo.state.value.phase != com.masgzy.anything.data.ScanPhase.IDLE) {
+                        delay(200)
+                    }
+                }
+                true
+            } else {
+                false
+            }
+            // 2) SAF 注入段：存在不可映射目录（或常规段未能覆盖）时逐个收集注入；
+            //    全盘+目录模式下仅处理不可映射的虚拟目录
+            val pendingIndices = s.searchDirs.indices.filter { i ->
+                when {
+                    s.indexScope == IndexScope.FULL_DISK_AND_DIRS -> mapped[i] == null && fullDiskOk
+                    scannedPhysical -> false
+                    else -> mapped[i] == null
+                }
+            }
+            if (pendingIndices.isEmpty()) {
+                if (!scannedPhysical && s.searchDirs.isEmpty()) {
+                    repo.setStatusText("尚未授权任何目录")
+                }
+                return@launch
+            }
+            if (!scannedPhysical) repo.setStatusText("正在遍历目录…")
+            val uris = pendingIndices.map { s.searchDirs[it] }
+            val json = SafDirs.collectEntries(
+                context,
+                uris,
+                extractDoc = { name, bytes -> repo.extractDoc(name, bytes) },
+                onProgress = { n -> repo.setStatusText("已收录 $n 项…") },
+            )
+            if (json == null) {
+                repo.setStatusText("目录授权已失效，请重新添加")
+            } else if (!repo.ingest(json)) {
+                repo.setStatusText("引擎忙，稍后再试")
             }
         }
     }
@@ -313,7 +368,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 设置页开关：开启立即枚举；关闭清空扩展条目（随快照同步）。 */
+    /** 目录页「Android/data」条目开关（alpha26 自设置页迁入）：
+     *  开启立即枚举；关闭清空扩展条目（随快照同步）。 */
     fun setAndroidDataEnabled(on: Boolean) {
         updateSettings { s -> s.copy(scanAndroidData = on) }
         if (on) {
@@ -481,8 +537,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 启动自动检查：MainShell 首次挂载后调用，延迟几秒避开冷启动繁忙期；
      * 开关关闭或本会话已被抑制（用户关过弹窗）则不查。无更新/失败静默回 Idle。
+     * offline 渠道（BuildConfig.UPDATE_CHECK=false）直接短路：
+     * 该渠道同时已在 Manifest 层移除 INTERNET 权限。
      */
     fun maybeAutoCheckOnStartup() {
+        if (!BuildConfig.UPDATE_CHECK) return
         if (autoCheckStarted) return
         autoCheckStarted = true
         if (!_settings.value.autoCheckUpdates) return
@@ -496,8 +555,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      * 检查更新（设置页「版本」项点击 = manual；自动 = silent）。
      * 手动检查结果全量反馈到 [updateState]（含失败提示）；
      * 自动检查仅在有新版本时置 Available，无更新/失败静默回 Idle 不打扰。
+     * offline 渠道短路为 UpToDate（UI 层已隐藏入口，防御性兜底）。
      */
     fun checkForUpdates(manual: Boolean) {
+        if (!BuildConfig.UPDATE_CHECK) {
+            _updateState.value = UpdateState.UpToDate
+            return
+        }
         if (_updateState.value is UpdateState.Checking) return
         _updateState.value = UpdateState.Checking
         viewModelScope.launch {

@@ -278,22 +278,36 @@ impl ContentStore {
 
     /// 移除一个文档；返回是否存在。
     pub fn remove(&self, path: &str) -> bool {
+        self.remove_batch(std::slice::from_ref(&path.to_string())) > 0
+    }
+
+    /// 批量移除多个文档：单次 commit 提交（alpha26 增量优化 —— 变更文档
+    /// 在旧实现里逐条 remove，每个文档都触发一次 tantivy commit +
+    /// reader.reload，多文档变更时提交次数线性放大，Android flash 上
+    /// 单次 commit 可达百毫秒级）。返回实际移除的路径数；commit 失败
+    /// 仍按移除计数返回（与 remove/remove_except 语义一致）。
+    pub fn remove_batch(&self, paths: &[String]) -> usize {
+        if paths.is_empty() {
+            return 0;
+        }
         let core = match self.core() {
             Some(c) => c,
-            None => return false,
+            None => return 0,
         };
-        {
-            let mut ids = core.id_set.write().unwrap();
-            if !ids.remove(path) {
-                return false;
-            }
+        let victims: Vec<String> = {
+            let mut ids = match core.id_set.write() {
+                Ok(g) => g,
+                Err(_) => return 0,
+            };
+            paths.iter().filter(|p| ids.remove(*p)).cloned().collect()
+        };
+        if victims.is_empty() {
+            return 0;
         }
-        let ok = self.commit_deletes(&core, std::iter::once(path.to_string()));
-        if !ok {
-            // 删除失败仅影响该条，不中断调用方（Go 同款）；id_set 不回滚
-            return true;
+        if !self.commit_deletes(&core, victims.iter().cloned()) {
+            return victims.len();
         }
-        true
+        victims.len()
     }
 
     /// 仅保留 seen 中的文档，其余移除；返回被移除的路径数。

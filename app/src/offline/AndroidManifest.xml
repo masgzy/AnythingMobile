@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- offline 渠道专用 Manifest（alpha26）：
+     在主 Manifest 合并结果上移除 INTERNET 权限 —— 该渠道面向"不愿让
+     应用具备任何联网能力"的用户，检查更新功能已在构建期关闭
+     （BuildConfig.UPDATE_CHECK=false），权限层再兜底一层：
+     即使未来有代码路径误发网络请求，也会在系统层直接失败。
+     tools:node="remove" 是 AGP 官方的权限裁剪机制，合并优先级高于
+     主 Manifest 与全部依赖库（AAR 声明的 INTERNET 也会被一并去掉）。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission
+        android:name="android.permission.INTERNET"
+        tools:node="remove" />
+
+</manifest>

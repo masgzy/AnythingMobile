@@ -272,37 +272,13 @@ fun SettingsScreen(
                     enabled = !scanning && repoState.ready,
                     onClick = { viewModel.startScan(incremental = false) },
                 )
-                GroupDivider()
-                PreferenceItem(
-                    icon = painterResource(R.drawable.ic_folder),
-                    title = "仅搜索选定目录",
-                    subtitle = "开启后索引只覆盖「目录」页授权的目录；" +
-                        "关闭则全盘扫描",
-                    trailing = {
-                        Switch(
-                            checked = settings.scopedSearchOnly,
-                            onCheckedChange = { viewModel.setScopedSearchOnly(it) },
-                        )
-                    },
-                )
+                // 索引范围（全盘+目录/仅目录/仅全盘）与 Android/data 收录
+                // alpha26 起归入「目录」页管理（与目录清单同处一个页面）
             }
 
-            // ---- 扩展扫描（Shizuku / Stellar） ----
-            SectionHeader("扩展扫描")
+            // ---- 扩展扫描（Shizuku / Stellar）：开关已迁入「目录」页条目 ----
+            SectionHeader("特权通道")
             GroupCard {
-                PreferenceItem(
-                    icon = painterResource(R.drawable.ic_folder_special),
-                    title = "扫描 Android/data 目录",
-                    subtitle = "借助 Shizuku / Stellar 特权收录应用数据目录的文件名" +
-                        "（不含全文内容；Android/data 在 Android 11+ 对普通应用隔离）",
-                    trailing = {
-                        Switch(
-                            checked = settings.scanAndroidData,
-                            onCheckedChange = { viewModel.setAndroidDataEnabled(it) },
-                        )
-                    },
-                )
-                GroupDivider()
                 PreferenceItem(
                     icon = painterResource(R.drawable.ic_key),
                     title = "Shizuku / Stellar 授权",
@@ -387,45 +363,55 @@ fun SettingsScreen(
                     },
                 )
                 GroupDivider()
-                PreferenceItem(
-                    icon = painterResource(R.drawable.ic_info),
-                    title = "版本",
-                    subtitle = when (val us = updateState) {
-                        is AppViewModel.UpdateState.Checking -> "正在检查更新…"
-                        is AppViewModel.UpdateState.UpToDate ->
-                            "${BuildConfig.VERSION_NAME} · 已是最新版本"
-                        is AppViewModel.UpdateState.Failed ->
-                            "检查失败：${us.message} · 点击重试"
-                        else -> "${BuildConfig.VERSION_NAME} · GPL-3.0 · 点击检查更新"
-                    },
-                    onClick = { viewModel.checkForUpdates(manual = true) },
-                    trailing = {
-                        when (val us = updateState) {
-                            is AppViewModel.UpdateState.Checking ->
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                )
-                            is AppViewModel.UpdateState.Available -> PulseDot()
-                            else -> Unit
-                        }
-                    },
-                )
-                GroupDivider()
-                PreferenceItem(
-                    icon = painterResource(R.drawable.ic_system_update_alt),
-                    title = "启动时检查更新",
-                    subtitle = "进入应用几秒后向 GitHub 查询新版本，发现更新时提醒；" +
-                        "关闭后仍可在上方手动检查",
-                    trailing = {
-                        Switch(
-                            checked = settings.autoCheckUpdates,
-                            onCheckedChange = { v ->
-                                viewModel.updateSettings { s -> s.copy(autoCheckUpdates = v) }
-                            },
-                        )
-                    },
-                )
+                if (BuildConfig.UPDATE_CHECK) {
+                    PreferenceItem(
+                        icon = painterResource(R.drawable.ic_info),
+                        title = "版本",
+                        subtitle = when (val us = updateState) {
+                            is AppViewModel.UpdateState.Checking -> "正在检查更新…"
+                            is AppViewModel.UpdateState.UpToDate ->
+                                "${BuildConfig.VERSION_NAME} · 已是最新版本"
+                            is AppViewModel.UpdateState.Failed ->
+                                "检查失败：${us.message} · 点击重试"
+                            else -> "${BuildConfig.VERSION_NAME} · GPL-3.0 · 点击检查更新"
+                        },
+                        onClick = { viewModel.checkForUpdates(manual = true) },
+                        trailing = {
+                            when (val us = updateState) {
+                                is AppViewModel.UpdateState.Checking ->
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                is AppViewModel.UpdateState.Available -> PulseDot()
+                                else -> Unit
+                            }
+                        },
+                    )
+                    GroupDivider()
+                    PreferenceItem(
+                        icon = painterResource(R.drawable.ic_system_update_alt),
+                        title = "启动时检查更新",
+                        subtitle = "进入应用几秒后向 GitHub 查询新版本，发现更新时提醒；" +
+                            "关闭后仍可在上方手动检查",
+                        trailing = {
+                            Switch(
+                                checked = settings.autoCheckUpdates,
+                                onCheckedChange = { v ->
+                                    viewModel.updateSettings { s -> s.copy(autoCheckUpdates = v) }
+                                },
+                            )
+                        },
+                    )
+                } else {
+                    // offline 渠道：不检查更新（INTERNET 权限已随 Manifest 移除）
+                    PreferenceItem(
+                        icon = painterResource(R.drawable.ic_info),
+                        title = "版本",
+                        subtitle = "${BuildConfig.VERSION_NAME} · 离线版 · 不检查更新，" +
+                            "新版本请到 GitHub 仓库查看",
+                    )
+                }
             }
 
             // ---- 关于 ----

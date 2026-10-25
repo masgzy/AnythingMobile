@@ -74,13 +74,17 @@ jobs:
             -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" 2>/dev/null | grep SHA256 || true
 
       # Gradle Wrapper 已随仓库分发，无需现场生成
-      - name: 构建 R8 收缩的签名 APK（多 ABI + universal）
+      # 双渠道（alpha26）：standard（含检查更新）+ offline（不检查更新、
+      # Manifest 移除 INTERNET 权限）——同一份代码，满足"零网络请求"用户
+      - name: 构建双渠道 R8 签名 APK（standard + offline，各多 ABI + universal）
         run: |
-          ./gradlew :app:assembleRelease --no-daemon
+          ./gradlew :app:assembleStandardRelease :app:assembleOfflineRelease --no-daemon
 
-      # splits 全局生效：release 产出 4 个 APK（app-*-release.apk），
-      # 需重命名为 AnythingMobile-<版本>-<abi>.apk 后再上传。
-      - name: 产物清单（统一重命名为 AnythingMobile-<版本>-<abi>.apk）
+      # splits × flavor 全局生效：release 产出 8 个 APK（app-<channel>-<abi>-release.apk），
+      # 重命名规则（用户指定的 _offline 后缀）：
+      #   standard → AnythingMobile-<版本>-<abi>.apk
+      #   offline  → AnythingMobile-<版本>-<abi>_offline.apk
+      - name: 产物清单（统一重命名，offline 包加 _offline 后缀）
         run: |
           VERSION=$(sed -n 's/.*versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -1)
           OUT=app/build/outputs/apk/release
@@ -92,7 +96,11 @@ jobs:
               *x86_64*)      ABI=x86_64 ;;
               *)             ABI=universal ;;
             esac
-            mv "$f" "$OUT/renamed/AnythingMobile-$VERSION-$ABI.apk"
+            case "$f" in
+              *offline*) SUFFIX="_offline" ;;
+              *)         SUFFIX="" ;;
+            esac
+            mv "$f" "$OUT/renamed/AnythingMobile-$VERSION-$ABI$SUFFIX.apk"
           done
           ls -lh "$OUT/renamed"
           echo "APK_DIR=$OUT/renamed" >> "$GITHUB_ENV"

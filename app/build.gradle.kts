@@ -22,10 +22,30 @@ android {
         applicationId = "com.masgzy.anything"
         minSdk = 24
         targetSdk = 36
-        versionCode = 25
-        versionName = "1.0.0-alpha25"
+        versionCode = 26
+        versionName = "1.0.0-alpha26"
         // 仪器化测试跑在 Android 虚拟机上（.github/workflows/emulator.yml）
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // 检查更新总开关：standard 渠道默认开；offline 渠道置 false 且
+        // 连 INTERNET 权限一并移除（app/src/offline/AndroidManifest.xml），
+        // 给不愿让应用具备联网能力的用户一个零网络请求的发行包（alpha26）
+        buildConfigField("boolean", "UPDATE_CHECK", "true")
+    }
+
+    // 发行渠道（alpha26）：同一份代码构建两个变体 ——
+    //   standard：功能完整（应用内检查更新，Release 附件名无后缀）
+    //   offline  ：不检查更新 + Manifest 移除 INTERNET 权限（附件名 _offline）
+    // applicationId 保持一致：offline 包可直接覆盖安装 standard 版，
+    // 索引与设置无缝延续。
+    flavorDimensions += "channel"
+    productFlavors {
+        create("standard") {
+            dimension = "channel"
+        }
+        create("offline") {
+            dimension = "channel"
+            buildConfigField("boolean", "UPDATE_CHECK", "false")
+        }
     }
 
     // 按 ABI 拆分产物：三种单架构 APK + 一个 universal 通吃包。
@@ -119,8 +139,6 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui-tooling-preview")
-    // 扩展图标集：筛选按钮（AllInclusive/VideoLibrary/MusicNote 等）需要；
-    // release 构建经 R8 裁剪后仅保留实际引用的图标。
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // material-kolor：ImageToolbox 同款取色引擎（HCT/DynamicScheme/PaletteStyle）。

@@ -24,14 +24,17 @@ import com.masgzy.anything.ui.theme.PaletteStyle
  *   - AMOLED 纯黑：深色模式下将 surface 置为纯黑，省电护眼。
  * 功能设置：
  *   - 进入应用时自动更新索引（增量，有变动才重解析）；
- *   - 扫描 Android/data 目录：借助 Shizuku/Stellar 特权通道收录应用数据
- *     目录的文件名（Android 11+ 对普通应用隔离，需用户另行授权）；
+ *   - 索引范围三模式（alpha26）：全盘+目录 / 仅目录 / 仅全盘 ——
+ *     替代 alpha19 的 scopedSearchOnly 布尔开关；
+ *   - 扫描 Android/data 目录：alpha26 起入口挪到「目录」页（与添加目录
+ *     同列的一个条目，不再是设置页独立开关）；借助 Shizuku/Stellar
+ *     特权通道收录应用数据目录的文件名（Android 11+ 隔离区）；
  *   - 筛选文字显示时长：点「所有」展开类别钮后，文字标签自动显示的时长
  *     （5 秒后消失，点击重新显示；可选不显示/3/5/10 秒/常驻）；
  *   - 结果排序：按名称 / 按时间（对应原版 FileSortSettings.NAME/TIME）；
  *   - 悬浮分页底栏：结果超一页时底部悬浮翻页条（默认开启）；
  *   - 液态玻璃底栏：底栏毛玻璃质感（Android 12+ 完整效果，默认关）；
- *   - 搜索范围：仅搜索选定目录（SAF 文件夹选择器授权，目录清单一并持久化）；
+ *   - 搜索目录（SAF 文件夹选择器授权，目录清单一并持久化）；
  *   - 首次启动引导页标记。
  *
  * 存储选用 SharedPreferences：读轻量同步（主题冷启动即需），写经 apply 异步。
@@ -48,7 +51,8 @@ data class AppSettings(
     val invertColors: Boolean = false,
     val amoled: Boolean = false,
     val autoScanOnEnter: Boolean = true,
-    /** 扫描 Android/data 目录（需 Shizuku/Stellar 特权，仅收录名称不含全文）。 */
+    /** 扫描 Android/data 目录（需 Shizuku/Stellar 特权，仅收录名称不含全文）。
+     *  alpha26 起由「目录」页的 Android/data 条目开关驱动。 */
     val scanAndroidData: Boolean = false,
     /** 筛选钮文字标签显示时长（秒）：0=不自动显示，-1=常驻，>0=自动隐藏秒数。 */
     val filterLabelSeconds: Int = 5,
@@ -57,8 +61,14 @@ data class AppSettings(
     val showPaginator: Boolean = true,
     /** 液态玻璃底栏：底栏/翻页条毛玻璃质感（Android 12+ 完整效果）。 */
     val liquidGlass: Boolean = false,
-    /** 仅搜索选定目录：false=全盘；true=只索引 searchDirs 里的目录。 */
-    val scopedSearchOnly: Boolean = false,
+    /** 索引/搜索范围（alpha26 三模式）：
+     *  - [IndexScope.FULL_DISK_ONLY] 仅全盘（历史默认）；
+     *  - [IndexScope.DIRS_ONLY] 仅目录：只索引 searchDirs（alpha19 起
+     *    scopedSearchOnly=true 的语义）；
+     *  - [IndexScope.FULL_DISK_AND_DIRS] 全盘+目录：全盘扫描之外，
+     *    「同步索引」还经 SAF/DocumentsProvider 收录目录清单中
+     *    不可物理映射的虚拟目录（部分应用的文件提供器只经此暴露内容）。 */
+    val indexScope: IndexScope = IndexScope.FULL_DISK_ONLY,
     /** 已授权搜索目录（SAF tree URI 列表，JSON 存储持久化授权）。 */
     val searchDirs: List<String> = emptyList(),
     val welcomeSeen: Boolean = false,
@@ -69,6 +79,21 @@ data class AppSettings(
 )
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
+
+/** 索引/搜索范围三模式（alpha26，替代 scopedSearchOnly 布尔）。 */
+enum class IndexScope {
+    /** 全盘 + 目录：全盘扫描，目录清单中的虚拟目录另行 SAF 注入。 */
+    FULL_DISK_AND_DIRS,
+    /** 仅目录：只索引已授权目录。 */
+    DIRS_ONLY,
+    /** 仅全盘（历史默认语义）。 */
+    FULL_DISK_ONLY;
+
+    companion object {
+        fun from(name: String?): IndexScope? =
+            entries.firstOrNull { it.name == name }
+    }
+}
 
 /**
  * 角色化配色：对应 M3 配色方案中可由用户直接指定的六个关键角色，
@@ -125,7 +150,14 @@ class SettingsRepository(context: Context) {
         sortByName = prefs.getBoolean(KEY_SORT_NAME, true),
         showPaginator = prefs.getBoolean(KEY_SHOW_PAGINATOR, true),
         liquidGlass = prefs.getBoolean(KEY_LIQUID_GLASS, false),
-        scopedSearchOnly = prefs.getBoolean(KEY_SCOPED_SEARCH, false),
+        // 三模式迁移（alpha26）：优先读新 key；旧用户按 scopedSearchOnly 布尔
+        // 折算（true=仅目录，false=仅全盘），不存在的场景回落默认仅全盘
+        indexScope = IndexScope.from(prefs.getString(KEY_INDEX_SCOPE, null))
+            ?: if (prefs.contains(KEY_SCOPED_SEARCH) && prefs.getBoolean(KEY_SCOPED_SEARCH, false)) {
+                IndexScope.DIRS_ONLY
+            } else {
+                IndexScope.FULL_DISK_ONLY
+            },
         searchDirs = runCatching {
             val arr = org.json.JSONArray(prefs.getString(KEY_SEARCH_DIRS, "[]") ?: "[]")
             (0 until arr.length()).map { arr.getString(it) }
@@ -170,7 +202,7 @@ class SettingsRepository(context: Context) {
 
     fun setLiquidGlass(v: Boolean) = put(KEY_LIQUID_GLASS, v)
 
-    fun setScopedSearchOnly(v: Boolean) = put(KEY_SCOPED_SEARCH, v)
+    fun setIndexScope(v: IndexScope) = put(KEY_INDEX_SCOPE, v.name)
 
     fun setSearchDirs(dirs: List<String>) {
         val arr = org.json.JSONArray()
@@ -209,7 +241,8 @@ class SettingsRepository(context: Context) {
         private const val KEY_SORT_NAME = "sort_by_name"
         private const val KEY_SHOW_PAGINATOR = "show_paginator"
         private const val KEY_LIQUID_GLASS = "liquid_glass"
-        private const val KEY_SCOPED_SEARCH = "scoped_search_only"
+        private const val KEY_INDEX_SCOPE = "index_scope"
+        private const val KEY_SCOPED_SEARCH = "scoped_search_only" // 旧布尔开关，仅迁移读取
         private const val KEY_SEARCH_DIRS = "search_dirs"
         private const val KEY_WELCOME_SEEN = "welcome_seen"
         private const val KEY_LOG_LEVEL = "log_level"
