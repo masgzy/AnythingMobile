@@ -692,7 +692,7 @@ fun RowScope.FloatingGlassBottomBarItem(
 
 @Composable
 fun FloatingGlassBottomBarIcon(
-    imageVector: androidx.compose.ui.graphics.vector.ImageVector,
+    painter: androidx.compose.ui.graphics.painter.Painter,
     contentDescription: String?,
     selected: Boolean = false,
 ) {
@@ -705,7 +705,7 @@ fun FloatingGlassBottomBarIcon(
         MaterialTheme.colorScheme.onSurfaceVariant
     }
     Icon(
-        imageVector = imageVector,
+        painter = painter,
         contentDescription = contentDescription,
         tint = tint
     )
@@ -714,8 +714,8 @@ fun FloatingGlassBottomBarIcon(
 @Composable
 fun FloatingGlassBottomBarIcon(
     selected: Boolean = false,
-    selectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
-    unselectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    selectedIcon: androidx.compose.ui.graphics.painter.Painter,
+    unselectedIcon: androidx.compose.ui.graphics.painter.Painter,
 ) {
     val localColor = LocalFloatingBottomBarContentColor.current
     val tint = if (localColor != Color.Unspecified) {
@@ -726,7 +726,7 @@ fun FloatingGlassBottomBarIcon(
         MaterialTheme.colorScheme.onSurfaceVariant
     }
     Icon(
-        imageVector = if (selected) selectedIcon else unselectedIcon,
+        painter = if (selected) selectedIcon else unselectedIcon,
         contentDescription = null,
         tint = tint
     )

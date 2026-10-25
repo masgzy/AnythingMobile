@@ -22,8 +22,8 @@ android {
         applicationId = "com.masgzy.anything"
         minSdk = 24
         targetSdk = 36
-        versionCode = 24
-        versionName = "1.0.0-alpha24"
+        versionCode = 25
+        versionName = "1.0.0-alpha25"
         // 仪器化测试跑在 Android 虚拟机上（.github/workflows/emulator.yml）
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -54,9 +54,10 @@ android {
 
     buildTypes {
         release {
-            // R8 深度收缩。大头是 material-icons-extended：仅用 39 个图标，
-            // 未开启时上万个未引用图标类原样进包（~28MB），整个 Compose 栈
-            // 无裁剪进包（10 个 dex 共 ~62MB）；开启后按实际引用裁剪。
+            // R8 深度收缩。alpha25 起图标已迁 Material Symbols drawable，
+            // 不再引入 material-icons-extended（历史上它是体积大头：仅用
+            // 39 个图标却引入上万个类，未开 R8 时 ~28MB）；R8 继续负责
+            // Compose 栈与引擎 JNI 契约的按引用裁剪。
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -111,7 +112,8 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
 
-    // Compose（BOM 2026.08.00：ui/foundation 1.12.0、material3 1.4.0、icons 1.7.8）
+    // Compose（BOM 2026.08.00：ui/foundation 1.12.0、material3 1.4.0；
+    // 图标已迁 Material Symbols drawable（alpha25），不再依赖 material-icons-*）
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
@@ -119,7 +121,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     // 扩展图标集：筛选按钮（AllInclusive/VideoLibrary/MusicNote 等）需要；
     // release 构建经 R8 裁剪后仅保留实际引用的图标。
-    implementation("androidx.compose.material:material-icons-extended")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // material-kolor：ImageToolbox 同款取色引擎（HCT/DynamicScheme/PaletteStyle）。

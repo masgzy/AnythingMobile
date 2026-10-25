@@ -1,5 +1,6 @@
 package com.masgzy.anything.ui
 
+import com.masgzy.anything.R
 import android.content.Intent
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -21,18 +22,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.FolderOff
-import androidx.compose.material.icons.rounded.FolderSpecial
-import androidx.compose.material.icons.rounded.HelpOutline
-import androidx.compose.material.icons.rounded.ManageSearch
-import androidx.compose.material.icons.rounded.Schedule
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.SwapHoriz
-import androidx.compose.material.icons.rounded.TravelExplore
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -57,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -155,19 +145,19 @@ fun DirectoryScreen(
                     )
                     GuideStep(
                         step = "1",
-                        icon = Icons.Rounded.Add,
+                        icon = painterResource(R.drawable.ic_add),
                         title = "添加目录",
                         desc = "点下方按钮，在系统文件夹选择器里挑选想纳入搜索的文件夹并授权",
                     )
                     GuideStep(
                         step = "2",
-                        icon = Icons.Rounded.ManageSearch,
+                        icon = painterResource(R.drawable.ic_manage_search),
                         title = "同步索引",
                         desc = "点「同步选定目录」，应用会读取目录里的文件名与 Office 文档正文建索引",
                     )
                     GuideStep(
                         step = "3",
-                        icon = Icons.Rounded.Search,
+                        icon = painterResource(R.drawable.ic_search),
                         title = "去搜索",
                         desc = "切到「搜索」页输入关键词即可命中目录内文件；" +
                             "配合顶栏「仅搜索选定目录」开关可切换全盘/限定范围",
@@ -185,7 +175,7 @@ fun DirectoryScreen(
                         .height(48.dp),
                     shape = RoundedCornerShape(14.dp),
                 ) {
-                    Icon(Icons.Rounded.Add, null, Modifier.size(20.dp))
+                    Icon(painterResource(R.drawable.ic_add), null, Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("添加目录")
                 }
@@ -235,7 +225,7 @@ fun DirectoryScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Icon(
-                            Icons.Rounded.Folder,
+                            painterResource(R.drawable.ic_folder),
                             null,
                             Modifier.size(56.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -284,7 +274,7 @@ fun DirectoryScreen(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(14.dp),
                     ) {
-                        Icon(Icons.Rounded.ManageSearch, null, Modifier.size(18.dp))
+                        Icon(painterResource(R.drawable.ic_manage_search), null, Modifier.size(18.dp))
                         Text(
                             if (settings.scopedSearchOnly) "同步选定目录" else "重建全盘索引",
                             modifier = Modifier.padding(start = 6.dp),
@@ -309,7 +299,7 @@ fun DirectoryScreen(
                         verticalAlignment = Alignment.Top,
                     ) {
                         Icon(
-                            Icons.Rounded.HelpOutline,
+                            painterResource(R.drawable.ic_help_outline),
                             null,
                             Modifier.size(20.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -338,7 +328,7 @@ private fun DirectoryRow(uriStr: String, onRemove: () -> Unit) {
         colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
         leadingContent = {
             Icon(
-                if (valid) Icons.Rounded.Folder else Icons.Rounded.FolderOff,
+                if (valid) painterResource(R.drawable.ic_folder) else painterResource(R.drawable.ic_folder_off),
                 null,
                 tint = if (valid) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.error,
@@ -358,7 +348,7 @@ private fun DirectoryRow(uriStr: String, onRemove: () -> Unit) {
         },
         trailingContent = {
             IconButton(onClick = onRemove) {
-                Icon(Icons.Rounded.Close, "移除", modifier = Modifier.size(18.dp))
+                Icon(painterResource(R.drawable.ic_close), "移除", modifier = Modifier.size(18.dp))
             }
         },
     )
@@ -370,7 +360,7 @@ private fun DirectoryRow(uriStr: String, onRemove: () -> Unit) {
 
 /** 三步引导行：数字圆徽 + 图标 + 标题/说明。 */
 @Composable
-private fun GuideStep(step: String, icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, desc: String) {
+private fun GuideStep(step: String, icon: androidx.compose.ui.graphics.painter.Painter, title: String, desc: String) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -478,7 +468,7 @@ private fun IndexStatusCard(stats: IndexStats?, scanning: Boolean) {
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            if (scanning) Icons.Rounded.SwapHoriz else Icons.Rounded.TravelExplore,
+                            if (scanning) painterResource(R.drawable.ic_swap_horiz) else painterResource(R.drawable.ic_travel_explore),
                             null,
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.size(24.dp),
@@ -519,7 +509,7 @@ private fun IndexStatusCard(stats: IndexStats?, scanning: Boolean) {
                     if (stats.external > 0L) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                Icons.Rounded.FolderSpecial,
+                                painterResource(R.drawable.ic_folder_special),
                                 null,
                                 Modifier.size(14.dp),
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
@@ -535,7 +525,7 @@ private fun IndexStatusCard(stats: IndexStats?, scanning: Boolean) {
                     if (stats.finishedAt.isNotBlank()) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                Icons.Rounded.Schedule,
+                                painterResource(R.drawable.ic_schedule),
                                 null,
                                 Modifier.size(14.dp),
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),

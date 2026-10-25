@@ -1,5 +1,6 @@
 package com.masgzy.anything.ui
 
+import com.masgzy.anything.R
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
@@ -15,7 +16,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,36 +35,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Help
-import androidx.compose.material.icons.rounded.Brightness6
-import androidx.compose.material.icons.rounded.BugReport
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Colorize
-import androidx.compose.material.icons.rounded.Contrast
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.FolderSpecial
-import androidx.compose.material.icons.rounded.InvertColors
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Key
-import androidx.compose.material.icons.rounded.Label
-import androidx.compose.material.icons.rounded.LensBlur
-import androidx.compose.material.icons.rounded.Palette
-import androidx.compose.material.icons.rounded.RestartAlt
-import androidx.compose.material.icons.rounded.SortByAlpha
-import androidx.compose.material.icons.rounded.SpaceDashboard
-import androidx.compose.material.icons.rounded.DeleteSweep
-import androidx.compose.material.icons.rounded.Sync
-import androidx.compose.material.icons.rounded.SystemUpdateAlt
-import androidx.compose.material.icons.rounded.Terminal
-import androidx.compose.material.icons.rounded.Tonality
-import androidx.compose.material.icons.rounded.Wallpaper
-import androidx.compose.material.icons.rounded.WbTwilight
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -79,8 +53,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,6 +66,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -176,7 +151,7 @@ fun SettingsScreen(
             SectionHeader("外观")
             GroupCard {
                 PreferenceItem(
-                    icon = Icons.Rounded.Brightness6,
+                    icon = painterResource(R.drawable.ic_brightness_6),
                     title = "主题模式",
                     subtitle = modeLabel,
                     onClick = { showThemeModeDialog = true },
@@ -184,7 +159,7 @@ fun SettingsScreen(
                 GroupDivider()
                 if (monetAvailable) {
                     PreferenceItem(
-                        icon = Icons.Rounded.Wallpaper,
+                        icon = painterResource(R.drawable.ic_wallpaper),
                         title = "动态取色",
                         subtitle = "如果启用，应用颜色将更改为壁纸颜色",
                         trailing = {
@@ -199,7 +174,7 @@ fun SettingsScreen(
                     GroupDivider()
                 }
                 PreferenceItem(
-                    icon = Icons.Rounded.Palette,
+                    icon = painterResource(R.drawable.ic_palette),
                     title = "配色方案",
                     subtitle = paletteSubtitle(settings, monetAvailable),
                     onClick = { showPaletteSheet = true },
@@ -220,7 +195,7 @@ fun SettingsScreen(
                 )
                 GroupDivider()
                 PreferenceItem(
-                    icon = Icons.Rounded.Tonality,
+                    icon = painterResource(R.drawable.ic_tonality),
                     title = "Amoled模式",
                     subtitle = "如果启用，在夜间模式下背景色将设为纯黑",
                     trailing = {
@@ -234,7 +209,7 @@ fun SettingsScreen(
                 )
                 GroupDivider()
                 PreferenceItem(
-                    icon = Icons.Rounded.SpaceDashboard,
+                    icon = painterResource(R.drawable.ic_space_dashboard),
                     title = "悬浮分页底栏",
                     subtitle = "底部悬浮胶囊式页签（搜索/目录/设置），默认开启；" +
                         "关闭后改为通栏底栏",
@@ -247,7 +222,7 @@ fun SettingsScreen(
                 )
                 GroupDivider()
                 PreferenceItem(
-                    icon = Icons.Rounded.LensBlur,
+                    icon = painterResource(R.drawable.ic_lens_blur),
                     title = "液态玻璃底栏",
                     subtitle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         "底栏玻璃质感：背景模糊 + 折射高光（NPatch 同款实现）"
@@ -268,7 +243,7 @@ fun SettingsScreen(
             SectionHeader("索引")
             GroupCard {
                 PreferenceItem(
-                    icon = Icons.Rounded.Sync,
+                    icon = painterResource(R.drawable.ic_sync),
                     title = "进入应用时自动更新索引",
                     subtitle = "增量扫描，仅处理有变动的文件",
                     trailing = {
@@ -282,7 +257,7 @@ fun SettingsScreen(
                 )
                 GroupDivider()
                 PreferenceItem(
-                    icon = Icons.Rounded.Sync,
+                    icon = painterResource(R.drawable.ic_sync),
                     title = "立即更新索引",
                     subtitle = if (scanning) repoState.statusText else "增量检查文件变动",
                     enabled = !scanning && repoState.ready,
@@ -290,7 +265,7 @@ fun SettingsScreen(
                 )
                 GroupDivider()
                 PreferenceItem(
-                    icon = Icons.Rounded.RestartAlt,
+                    icon = painterResource(R.drawable.ic_restart_alt),
                     title = "重建索引",
                     subtitle = if (scanning) repoState.statusText
                     else "清空后重新扫描全部文件，耗时较长",
@@ -299,7 +274,7 @@ fun SettingsScreen(
                 )
                 GroupDivider()
                 PreferenceItem(
-                    icon = Icons.Rounded.Folder,
+                    icon = painterResource(R.drawable.ic_folder),
                     title = "仅搜索选定目录",
                     subtitle = "开启后索引只覆盖「目录」页授权的目录；" +
                         "关闭则全盘扫描",
@@ -316,7 +291,7 @@ fun SettingsScreen(
             SectionHeader("扩展扫描")
             GroupCard {
                 PreferenceItem(
-                    icon = Icons.Rounded.FolderSpecial,
+                    icon = painterResource(R.drawable.ic_folder_special),
                     title = "扫描 Android/data 目录",
                     subtitle = "借助 Shizuku / Stellar 特权收录应用数据目录的文件名" +
                         "（不含全文内容；Android/data 在 Android 11+ 对普通应用隔离）",
@@ -329,7 +304,7 @@ fun SettingsScreen(
                 )
                 GroupDivider()
                 PreferenceItem(
-                    icon = Icons.Rounded.Key,
+                    icon = painterResource(R.drawable.ic_key),
                     title = "Shizuku / Stellar 授权",
                     subtitle = when (shizukuState.status) {
                         ShizukuAccess.Status.NOT_RUNNING ->
@@ -348,7 +323,7 @@ fun SettingsScreen(
                 )
                 GroupDivider()
                 PreferenceItem(
-                    icon = Icons.Rounded.DeleteSweep,
+                    icon = painterResource(R.drawable.ic_delete_sweep),
                     title = "清理特权导出缓存",
                     subtitle = when {
                         privCacheBytes < 0 -> "打开 Android/data 文件时产生的临时副本"
@@ -364,14 +339,14 @@ fun SettingsScreen(
             SectionHeader("结果")
             GroupCard {
                 PreferenceItem(
-                    icon = Icons.Rounded.SortByAlpha,
+                    icon = painterResource(R.drawable.ic_sort_by_alpha),
                     title = "排序方式",
                     subtitle = sortLabel,
                     onClick = { showSortDialog = true },
                 )
                 GroupDivider()
                 PreferenceItem(
-                    icon = Icons.Rounded.Label,
+                    icon = painterResource(R.drawable.ic_label),
                     title = "筛选文字显示时长",
                     subtitle = "点击「所有」后类别文字的停留时间 · " + filterLabelLabel(settings.filterLabelSeconds),
                     onClick = { showFilterLabelDialog = true },
@@ -382,28 +357,28 @@ fun SettingsScreen(
             SectionHeader("其他")
             GroupCard {
                 PreferenceItem(
-                    icon = Icons.AutoMirrored.Rounded.Help,
+                    icon = painterResource(R.drawable.ic_help),
                     title = "搜索语法教程",
                     subtitle = "type: / dir: / 短语匹配的完整用法",
                     onClick = onOpenSyntaxHelp,
                 )
                 GroupDivider()
                 PreferenceItem(
-                    icon = Icons.Rounded.BugReport,
+                    icon = painterResource(R.drawable.ic_bug_report),
                     title = "日志等级",
                     subtitle = "记录 ${AppLogger.levelName(settings.logLevel)} 及以上级别的日志",
                     onClick = { showLogLevelDialog = true },
                 )
                 GroupDivider()
                 PreferenceItem(
-                    icon = Icons.Rounded.Terminal,
+                    icon = painterResource(R.drawable.ic_terminal),
                     title = "查看与分享日志",
                     subtitle = "查看运行日志，可导出分享用于问题反馈",
                     onClick = onOpenLog,
                 )
                 GroupDivider()
                 PreferenceItem(
-                    icon = Icons.Rounded.WbTwilight,
+                    icon = painterResource(R.drawable.ic_wb_twilight),
                     title = "重新查看欢迎页",
                     subtitle = "了解 Anything 的核心功能",
                     onClick = {
@@ -413,7 +388,7 @@ fun SettingsScreen(
                 )
                 GroupDivider()
                 PreferenceItem(
-                    icon = Icons.Rounded.Info,
+                    icon = painterResource(R.drawable.ic_info),
                     title = "版本",
                     subtitle = when (val us = updateState) {
                         is AppViewModel.UpdateState.Checking -> "正在检查更新…"
@@ -438,7 +413,7 @@ fun SettingsScreen(
                 )
                 GroupDivider()
                 PreferenceItem(
-                    icon = Icons.Rounded.SystemUpdateAlt,
+                    icon = painterResource(R.drawable.ic_system_update_alt),
                     title = "启动时检查更新",
                     subtitle = "进入应用几秒后向 GitHub 查询新版本，发现更新时提醒；" +
                         "关闭后仍可在上方手动检查",
@@ -679,7 +654,7 @@ private fun GroupDivider() {
  */
 @Composable
 private fun PreferenceItem(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: androidx.compose.ui.graphics.painter.Painter,
     title: String,
     subtitle: String,
     modifier: Modifier = Modifier,
@@ -872,7 +847,7 @@ private fun PaletteSheet(
                 modifier = Modifier.padding(vertical = 4.dp),
             ) {
                 Icon(
-                    Icons.Rounded.Palette,
+                    painterResource(R.drawable.ic_palette),
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(24.dp),
@@ -895,7 +870,7 @@ private fun PaletteSheet(
 
             // 调色板风格（ImageToolbox 配色方案弹窗同款选项）
             SheetActionRow(
-                icon = Icons.Rounded.Colorize,
+                icon = painterResource(R.drawable.ic_colorize),
                 title = "调色板风格",
                 subtitle = styleLabel(style),
                 enabled = !dynamicColorOn,
@@ -904,7 +879,7 @@ private fun PaletteSheet(
 
             // 反转颜色
             SheetActionRow(
-                icon = Icons.Rounded.InvertColors,
+                icon = painterResource(R.drawable.ic_invert_colors),
                 title = "反转颜色",
                 subtitle = "反转配色方案的所有颜色",
                 enabled = !dynamicColorOn,
@@ -920,7 +895,7 @@ private fun PaletteSheet(
 
             // 对比度
             SheetSliderRow(
-                icon = Icons.Rounded.Contrast,
+                icon = painterResource(R.drawable.ic_contrast),
                 title = "对比度",
                 value = contrast,
                 enabled = !dynamicColorOn,
@@ -993,7 +968,7 @@ private fun PaletteSheet(
 /** 弹层内通用设置行：左侧图标 + 标题/副标题 + 右侧控件。 */
 @Composable
 private fun SheetActionRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: androidx.compose.ui.graphics.painter.Painter,
     title: String,
     subtitle: String,
     enabled: Boolean,
@@ -1044,7 +1019,7 @@ private fun SheetActionRow(
 /** 对比度滑条行（-1..1，步进 0.01，与 ImageToolbox 一致；松手才提交）。 */
 @Composable
 private fun SheetSliderRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: androidx.compose.ui.graphics.painter.Painter,
     title: String,
     value: Float,
     enabled: Boolean,
@@ -1113,7 +1088,7 @@ private fun PresetChip(
         if (selected) {
             val checkTint =
                 if (Color(roles.primary).luminance() > 0.5f) Color.Black else Color.White
-            Icon(Icons.Rounded.Check, contentDescription = "已选中 $name", tint = checkTint)
+            Icon(painterResource(R.drawable.ic_check), contentDescription = "已选中 $name", tint = checkTint)
         }
     }
 }
@@ -1161,7 +1136,7 @@ private fun RoleSection(
                     )
                 }
                 Icon(
-                    if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                    if (expanded) painterResource(R.drawable.ic_expand_less) else painterResource(R.drawable.ic_expand_more),
                     contentDescription = if (expanded) "收起" else "展开",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

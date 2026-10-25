@@ -1,5 +1,6 @@
 package com.masgzy.anything.ui
 
+import com.masgzy.anything.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -7,10 +8,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,20 +25,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AllInclusive
-import androidx.compose.material.icons.rounded.Article
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Description
-import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.Image
-import androidx.compose.material.icons.rounded.InsertDriveFile
-import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material.icons.rounded.OpenInNew
-import androidx.compose.material.icons.rounded.Slideshow
-import androidx.compose.material.icons.rounded.TableChart
-import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -53,32 +40,33 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.masgzy.anything.data.UiHit
 import com.masgzy.anything.ui.animation.pressScale
-import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 /** 按扩展名判定文件类别（筛选快捷钮使用）。 */
-enum class FileCategory(val label: String, val icon: ImageVector, val exts: Set<String>) {
-    ALL("所有", Icons.Rounded.AllInclusive, emptySet()),
-    VIDEO("视频", Icons.Rounded.VideoLibrary, setOf("mp4", "avi", "mkv", "mov", "3gp", "flv", "wmv", "webm", "m4v", "ts")),
-    AUDIO("音乐", Icons.Rounded.MusicNote, setOf("mp3", "flac", "wav", "aac", "ogg", "m4a", "wma", "ape", "mid")),
-    IMAGE("图片", Icons.Rounded.Image, setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "svg")),
-    DOC("文档", Icons.Rounded.Edit, setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "wps", "csv", "html", "xml")),
-    WORD("Word", Icons.Rounded.Description, setOf("doc", "docx", "wps", "txt", "md", "html")),
-    EXCEL("Excel", Icons.Rounded.TableChart, setOf("xls", "xlsx", "csv")),
-    PPT("PPT", Icons.Rounded.Slideshow, setOf("ppt", "pptx")),
-    ARTICLE("文章", Icons.Rounded.Article, setOf()),
+enum class FileCategory(val label: String, val iconRes: Int, val exts: Set<String>) {
+    ALL("所有", R.drawable.ic_all_inclusive, emptySet()),
+    VIDEO("视频", R.drawable.ic_video_library, setOf("mp4", "avi", "mkv", "mov", "3gp", "flv", "wmv", "webm", "m4v", "ts")),
+    AUDIO("音乐", R.drawable.ic_music_note, setOf("mp3", "flac", "wav", "aac", "ogg", "m4a", "wma", "ape", "mid")),
+    IMAGE("图片", R.drawable.ic_image, setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "svg")),
+    DOC("文档", R.drawable.ic_edit, setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "wps", "csv", "html", "xml")),
+    WORD("Word", R.drawable.ic_description, setOf("doc", "docx", "wps", "txt", "md", "html")),
+    EXCEL("Excel", R.drawable.ic_table_chart, setOf("xls", "xlsx", "csv")),
+    PPT("PPT", R.drawable.ic_slideshow, setOf("ppt", "pptx")),
+    ARTICLE("文章", R.drawable.ic_article, setOf()),
 }
 
 val FileCategory.isAll: Boolean get() = this == FileCategory.ALL
@@ -99,17 +87,18 @@ fun categoryOf(path: String): FileCategory {
 }
 
 /** 结果条目主图标。 */
-fun iconFor(hit: UiHit): ImageVector = when {
-    hit.isFolder -> Icons.Rounded.Folder
-    hit.matched == "content" -> Icons.Rounded.Article
+/** 结果条目主图标（返回 drawable 资源 ID，调用处在组合内 painterResource）。 */
+fun iconResFor(hit: UiHit): Int = when {
+    hit.isFolder -> R.drawable.ic_folder
+    hit.matched == "content" -> R.drawable.ic_article
     else -> when (val c = categoryOf(hit.path)) {
-        FileCategory.VIDEO -> Icons.Rounded.VideoLibrary
-        FileCategory.AUDIO -> Icons.Rounded.MusicNote
-        FileCategory.IMAGE -> Icons.Rounded.Image
-        FileCategory.DOC, FileCategory.WORD -> Icons.Rounded.Edit
-        FileCategory.EXCEL -> Icons.Rounded.TableChart
-        FileCategory.PPT -> Icons.Rounded.Slideshow
-        else -> if (c.exts.isNotEmpty()) Icons.Rounded.InsertDriveFile else Icons.Rounded.InsertDriveFile
+        FileCategory.VIDEO -> R.drawable.ic_video_library
+        FileCategory.AUDIO -> R.drawable.ic_music_note
+        FileCategory.IMAGE -> R.drawable.ic_image
+        FileCategory.DOC, FileCategory.WORD -> R.drawable.ic_edit
+        FileCategory.EXCEL -> R.drawable.ic_table_chart
+        FileCategory.PPT -> R.drawable.ic_slideshow
+        else -> R.drawable.ic_insert_drive_file
     }
 }
 
@@ -181,7 +170,7 @@ fun HitItem(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                imageVector = iconFor(hit),
+                painter = painterResource(iconResFor(hit)),
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(28.dp),
@@ -241,7 +230,7 @@ fun DetailSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    iconFor(hit), null,
+                    painterResource(iconResFor(hit)), null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(32.dp),
                 )
@@ -261,9 +250,9 @@ fun DetailSheet(
                 Modifier.fillMaxWidth().padding(8.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                SheetAction(Icons.Rounded.OpenInNew, if (hit.isFolder) "打开" else "打开路径", onOpen)
-                if (!hit.isFolder) SheetAction(Icons.Rounded.Description, "发送", onShare)
-                SheetAction(Icons.Rounded.Delete, "删除", onDelete)
+                SheetAction(painterResource(R.drawable.ic_open_in_new), if (hit.isFolder) "打开" else "打开路径", onOpen)
+                if (!hit.isFolder) SheetAction(painterResource(R.drawable.ic_description), "发送", onShare)
+                SheetAction(painterResource(R.drawable.ic_delete), "删除", onDelete)
             }
             Spacer(Modifier.height(24.dp))
         }
@@ -271,7 +260,7 @@ fun DetailSheet(
 }
 
 @Composable
-private fun SheetAction(icon: ImageVector, label: String, onClick: () -> Unit) {
+private fun SheetAction(icon: Painter, label: String, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         FilledIconButton(onClick = onClick, colors = IconButtonDefaults.filledIconButtonColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -299,7 +288,7 @@ private fun SheetAction(icon: ImageVector, label: String, onClick: () -> Unit) {
  */
 @Composable
 fun FilterButton(
-    icon: ImageVector,
+    icon: Painter,
     selected: Boolean,
     onClick: () -> Unit,
     label: String? = null,

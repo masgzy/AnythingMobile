@@ -1,5 +1,6 @@
 package com.masgzy.anything.ui
 
+import com.masgzy.anything.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,10 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Description
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -95,7 +93,7 @@ private fun WelcomePage(page: Int, onFinish: () -> Unit) {
         when (page) {
             0 -> {
                 Icon(
-                    Icons.Rounded.Search,
+                    painterResource(R.drawable.ic_search),
                     null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(140.dp),
@@ -107,7 +105,7 @@ private fun WelcomePage(page: Int, onFinish: () -> Unit) {
             }
             1 -> {
                 Icon(
-                    Icons.Rounded.Description,
+                    painterResource(R.drawable.ic_description),
                     null,
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(140.dp),
@@ -119,7 +117,7 @@ private fun WelcomePage(page: Int, onFinish: () -> Unit) {
             }
             else -> {
                 Icon(
-                    Icons.Rounded.CheckCircle,
+                    painterResource(R.drawable.ic_check_circle),
                     null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(140.dp),

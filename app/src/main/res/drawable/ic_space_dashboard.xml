@@ -1,0 +1,11 @@
+<!-- Material Symbols Rounded（google/material-design-icons，24px weight400）。
+     由 scripts/migrate_icons.py 生成； tint 由 Icon 组件按 LocalContentColor 注入。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+        android:width="24dp"
+        android:height="24dp"
+        android:viewportWidth="24"
+        android:viewportHeight="24">
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h240v-560H200v560Zm320 0h240v-280H520v280Zm0-360h240v-200H520v200Z" />
+</vector>

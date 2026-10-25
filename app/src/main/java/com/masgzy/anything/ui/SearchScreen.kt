@@ -1,5 +1,6 @@
 package com.masgzy.anything.ui
 
+import com.masgzy.anything.R
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -31,14 +32,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Help
-import androidx.compose.material.icons.rounded.AllInclusive
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.DoneAll
-import androidx.compose.material.icons.rounded.FilterList
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -71,6 +64,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -516,7 +510,7 @@ private fun FilterPanel(
                 options.forEach { opt ->
                     FilterButton(
                         label = opt.label,
-                        icon = opt.icon,
+                        icon = painterResource(opt.iconRes),
                         selected = current == opt,
                         labelVisible = labelsShown,
                         onClick = {
@@ -538,7 +532,7 @@ private fun FilterPanel(
         ) {
             FilterButton(
                 label = "所有",
-                icon = Icons.Rounded.AllInclusive,
+                icon = painterResource(R.drawable.ic_all_inclusive),
                 selected = current.isAll,
                 size = 56.dp,
                 labelVisible = labelsShown,
@@ -549,7 +543,7 @@ private fun FilterPanel(
             )
             Spacer(Modifier.height(12.dp))
             FilterButton(
-                icon = Icons.Rounded.FilterList,
+                icon = painterResource(R.drawable.ic_filter_list),
                 selected = false,
                 size = 44.dp,
                 // 点击后浮现的排序提示气泡（操作确认，固定短时长）
@@ -590,7 +584,7 @@ private fun SearchTopBar(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        Icons.Rounded.Search,
+                        painterResource(R.drawable.ic_search),
                         null,
                         Modifier.size(20.dp),
                         tint = cs.onSurfaceVariant,
@@ -625,7 +619,7 @@ private fun SearchTopBar(
                             modifier = Modifier.size(28.dp),
                         ) {
                             Icon(
-                                Icons.Rounded.Close,
+                                painterResource(R.drawable.ic_close),
                                 "清空",
                                 Modifier.size(18.dp),
                                 tint = cs.onSurfaceVariant,
@@ -637,7 +631,7 @@ private fun SearchTopBar(
         },
         actions = {
             IconButton(onClick = onOpenSyntaxHelp) {
-                Icon(Icons.AutoMirrored.Rounded.Help, "搜索语法教程")
+                Icon(painterResource(R.drawable.ic_help), "搜索语法教程")
             }
         },
     )
@@ -660,12 +654,12 @@ private fun SelectionTopBar(
             actionIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         ),
         navigationIcon = {
-            IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, "取消选择") }
+            IconButton(onClick = onClose) { Icon(painterResource(R.drawable.ic_close), "取消选择") }
         },
         title = { Text("已选择 $count 项") },
         actions = {
-            IconButton(onClick = onSelectAll) { Icon(Icons.Rounded.DoneAll, "全选") }
-            IconButton(onClick = onDelete) { Icon(Icons.Rounded.Delete, "删除") }
+            IconButton(onClick = onSelectAll) { Icon(painterResource(R.drawable.ic_done_all), "全选") }
+            IconButton(onClick = onDelete) { Icon(painterResource(R.drawable.ic_delete), "删除") }
         },
     )
 }
