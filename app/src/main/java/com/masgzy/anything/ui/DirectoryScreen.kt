@@ -36,8 +36,6 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.masgzy.anything.AppViewModel
 import com.masgzy.anything.data.IndexScope
+import com.masgzy.anything.ui.theme.uiPalette
 import com.masgzy.anything.data.IndexStats
 import com.masgzy.anything.data.SafDirs
 import com.masgzy.anything.data.ScanPhase
@@ -116,13 +115,7 @@ fun DirectoryScreen(
     Column(
         modifier = modifier.fillMaxSize(),
     ) {
-        TopAppBar(
-            title = { Text("目录") },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.surface,
-                titleContentColor = MaterialTheme.colorScheme.onSurface,
-            ),
-        )
+        AppTopBar("目录")
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),

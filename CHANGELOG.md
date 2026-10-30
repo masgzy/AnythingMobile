@@ -6,6 +6,27 @@
 本项目处于 alpha 阶段：存储格式与搜索语义可能在小版本间破坏性变更，
 升级后可能需要全量重建索引（应用会自动完成，无需手动操作）。
 
+## [1.0.0-alpha28] 2026-10-31
+
+### 双设计风格（参照 KernelSU）
+
+- **设计风格二选一**：设置 → 外观 → 「设计风格」，可在
+  **Material Design 3**（默认，历史行为不变）与
+  **Miuix · HyperOS 风格** 之间切换，全应用即时生效。
+  Miuix 风格经 miuix-ui 的 `ThemeController` 生成 HyperOS 色板
+  （顶栏 / 分组卡 / 开关 / 弹层 / 底栏等 chrome 换 HyperOS 观感，
+  KSU 同款双设计机制）；与 MD3 共享同一套主题模式、动态取色与
+  配色方案设置（主色作 Miuix 色板种子，调色板风格一一映射），
+  切换风格不丢失任何配色自定义。
+- **液态玻璃底栏两风格通用**：底栏（悬浮胶囊 / 通栏）配色随设计
+  风格取当前色板，液态玻璃质感（Android 13+ 背景实时模糊 +
+  折射高光）在 Material Design 3 与 Miuix 风格下均可开启。
+- 设置页单选弹窗在 Miuix 风格下换用 HyperOS 观感弹层；
+  设置分组标题直接使用 miuix `SmallTitle`；开关使用 miuix
+  `Switch`（自带 HyperOS 触感反馈）。
+- 新增依赖：`top.yukonga.miuix.kmp:miuix-ui:0.9.4`（与既有
+  `miuix-blur` 同版本同发布线）。
+
 ## [1.0.0-alpha27] 2026-10-30
 
 ### 安全加固（外部审计跟进）

@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.masgzy.anything.BuildConfig
 import com.masgzy.anything.data.AppSettings
 import com.masgzy.anything.data.EngineRepository
+import com.masgzy.anything.data.DesignStyle
 import com.masgzy.anything.data.IndexScope
 import com.masgzy.anything.data.IndexStats
 import com.masgzy.anything.data.ScanPhase
@@ -148,6 +149,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         settingsRepo.run {
             setThemeMode(next.themeMode)
+            setDesignStyle(next.designStyle)
             setDynamicColor(next.dynamicColor)
             setRoleColors(next.roleColors)
             setPaletteStyle(next.paletteStyle)
@@ -174,6 +176,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 悬浮分页底栏（默认开）。 */
     fun setShowPaginator(v: Boolean) = updateSettings { s -> s.copy(showPaginator = v) }
+
+    /** 设计风格：Material Design 3 / Miuix（HyperOS 风格，alpha28）。 */
+    fun setDesignStyle(v: DesignStyle) = updateSettings { s -> s.copy(designStyle = v) }
 
     /** 液态玻璃底栏（悬浮形态 + Android 13+ 才完整生效）。 */
     fun setLiquidGlass(v: Boolean) = updateSettings { s -> s.copy(liquidGlass = v) }

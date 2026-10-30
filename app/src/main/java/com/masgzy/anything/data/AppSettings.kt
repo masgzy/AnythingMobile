@@ -23,6 +23,10 @@ import com.masgzy.anything.ui.theme.PaletteStyle
  *   - 反转颜色：对静态方案所有角色取反（ImageToolbox 同款）；
  *   - AMOLED 纯黑：深色模式下将 surface 置为纯黑，省电护眼。
  * 功能设置：
+ *   - 设计风格（alpha28）：Material Design 3 / Miuix（HyperOS 风格）——
+ *     KSU 同款双设计切换；Miuix 风格经 miuix-ui 的 ThemeController 生成
+ *     HyperOS 色板（主色种子/调色板风格/动态取色与 M3 模式共享同一套设置），
+ *     未迁移的组件回退 MaterialTheme（用户自定义配色不丢失）；
  *   - 进入应用时自动更新索引（增量，有变动才重解析）；
  *   - 索引范围三模式（alpha26）：全盘+目录 / 仅目录 / 仅全盘 ——
  *     替代 alpha19 的 scopedSearchOnly 布尔开关；
@@ -41,6 +45,8 @@ import com.masgzy.anything.ui.theme.PaletteStyle
  */
 data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    /** 设计风格（alpha28，KSU 同款双设计）：MD3（默认，历史行为） / Miuix。 */
+    val designStyle: DesignStyle = DesignStyle.MATERIAL,
     val dynamicColor: Boolean = true,
     val roleColors: RoleColors = ColorTupleDefaults.defaultRoles,
     /** 调色板风格（ImageToolbox 配色方案弹窗的"调色板风格"项）。 */
@@ -79,6 +85,15 @@ data class AppSettings(
 )
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
+
+/**
+ * 设计风格（alpha28，参照 KernelSU 的 UiMode 双设计）：
+ *  - [MATERIAL]：Material Design 3（历史默认，material-kolor 调色引擎）；
+ *  - [MIUIX]：Miuix（HyperOS 风格）—— miuix-ui ThemeController 生成色板，
+ *    组件层经 LocalUiMode 派发（底栏/顶栏/设置分组等 chrome 换 HyperOS 观感）。
+ * 液态玻璃底栏（NPatch 同款）在两种风格下均可用。
+ */
+enum class DesignStyle { MATERIAL, MIUIX }
 
 /** 索引/搜索范围三模式（alpha26，替代 scopedSearchOnly 布尔）。 */
 enum class IndexScope {
@@ -124,6 +139,9 @@ class SettingsRepository(context: Context) {
         themeMode = runCatching {
             ThemeMode.valueOf(prefs.getString(KEY_THEME, ThemeMode.SYSTEM.name)!!)
         }.getOrDefault(ThemeMode.SYSTEM),
+        designStyle = runCatching {
+            DesignStyle.valueOf(prefs.getString(KEY_DESIGN_STYLE, DesignStyle.MATERIAL.name)!!)
+        }.getOrDefault(DesignStyle.MATERIAL),
         dynamicColor = prefs.getBoolean(KEY_DYNAMIC, true),
         roleColors = RoleColors(
             primary = prefs.getInt(KEY_ROLE_PRIMARY, ColorTupleDefaults.defaultRoles.primary),
@@ -168,6 +186,8 @@ class SettingsRepository(context: Context) {
     )
 
     fun setThemeMode(mode: ThemeMode) = put(KEY_THEME, mode.name)
+
+    fun setDesignStyle(v: DesignStyle) = put(KEY_DESIGN_STYLE, v.name)
 
     fun setDynamicColor(v: Boolean) = put(KEY_DYNAMIC, v)
 
@@ -224,6 +244,7 @@ class SettingsRepository(context: Context) {
 
     companion object {
         private const val KEY_THEME = "theme_mode"
+        private const val KEY_DESIGN_STYLE = "design_style"
         private const val KEY_DYNAMIC = "dynamic_color"
         private const val KEY_ROLE_PRIMARY = "role_primary"
         private const val KEY_ROLE_SECONDARY = "role_secondary"

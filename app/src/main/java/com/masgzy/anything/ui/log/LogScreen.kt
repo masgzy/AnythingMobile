@@ -21,11 +21,8 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -44,6 +41,8 @@ import com.masgzy.anything.log.AppLogger.Entry
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.masgzy.anything.ui.AppScaffold
+import com.masgzy.anything.ui.AppTopBar
 
 /**
  * 调试日志查看页（alpha22，参考 KSU/SukiSU 日志控制台 + 分享模式）：
@@ -66,35 +65,30 @@ fun LogScreen(onBack: () -> Unit) {
         entries = if (filter < 0) all else all.filter { it.level >= filter }
     }
 
-    Scaffold(
+    AppScaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("调试日志（${entries.size} 条）") },
+            AppTopBar(
+                title = "调试日志（${entries.size} 条）",
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = "返回")
                     }
                 },
-                actions = {
-                    IconButton(onClick = {
-                        AppLogger.clear()
-                        entries = emptyList()
-                    }) {
-                        Icon(painterResource(R.drawable.ic_delete), contentDescription = "清空日志")
-                    }
-                    IconButton(onClick = {
-                        val f = AppLogger.export(context)
-                        AppLogger.pruneExports(context)
-                        if (f != null) AppLogger.share(context, f)
-                    }) {
-                        Icon(painterResource(R.drawable.ic_share), contentDescription = "分享日志")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                ),
-            )
+            ) {
+                IconButton(onClick = {
+                    AppLogger.clear()
+                    entries = emptyList()
+                }) {
+                    Icon(painterResource(R.drawable.ic_delete), contentDescription = "清空日志")
+                }
+                IconButton(onClick = {
+                    val f = AppLogger.export(context)
+                    AppLogger.pruneExports(context)
+                    if (f != null) AppLogger.share(context, f)
+                }) {
+                    Icon(painterResource(R.drawable.ic_share), contentDescription = "分享日志")
+                }
+            }
         },
     ) { padding ->
         Column(

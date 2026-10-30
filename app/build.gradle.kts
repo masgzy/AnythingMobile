@@ -22,8 +22,8 @@ android {
         applicationId = "com.masgzy.anything"
         minSdk = 24
         targetSdk = 36
-        versionCode = 27
-        versionName = "1.0.0-alpha27"
+        versionCode = 28
+        versionName = "1.0.0-alpha28"
         // 仪器化测试跑在 Android 虚拟机上（.github/workflows/emulator.yml）
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 检查更新总开关：standard 渠道默认开；offline 渠道置 false 且
@@ -152,6 +152,10 @@ dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
     // 液态玻璃底栏（NPatch 同款实现的外部依赖）：backdrop 采样/折射 API
     implementation("top.yukonga.miuix.kmp:miuix-blur:0.9.4")
+    // Miuix 设计风格（alpha28，参照 KernelSU 的 UiMode 双设计）：
+    // MiuixTheme/ThemeController（HyperOS 色板）+ Scaffold/SmallTopAppBar/Switch 等基础组件
+    // 与 miuix-blur 同版本同发布线，保证 blur/theme 之间 API 一致
+    implementation("top.yukonga.miuix.kmp:miuix-ui:0.9.4")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.core:core-ktx:1.19.0")

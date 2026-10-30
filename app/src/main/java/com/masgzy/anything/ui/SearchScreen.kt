@@ -42,7 +42,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
@@ -78,6 +77,7 @@ import com.masgzy.anything.AppViewModel
 import com.masgzy.anything.StoragePermissions
 import com.masgzy.anything.data.ScanPhase
 import com.masgzy.anything.data.UiHit
+import com.masgzy.anything.ui.theme.uiPalette
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -177,7 +177,7 @@ fun SearchScreen(
     // 多选模式下拦截返回键
     BackHandler(enabled = inSelectMode) { selected = emptySet() }
 
-    Scaffold(
+    AppScaffold(
             topBar = {
                 // 顶栏切换带淡入淡出，避免生硬跳变
                 AnimatedContent(
@@ -566,7 +566,7 @@ private fun SearchTopBar(
     onQueryChange: (String) -> Unit,
     onOpenSyntaxHelp: () -> Unit,
 ) {
-    val cs = MaterialTheme.colorScheme
+    val cs = uiPalette()
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = cs.surface,
@@ -646,12 +646,13 @@ private fun SelectionTopBar(
     onSelectAll: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val p = uiPalette()
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            titleContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            navigationIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            actionIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            containerColor = p.secondaryContainer,
+            titleContentColor = p.onSecondaryContainer,
+            navigationIconContentColor = p.onSecondaryContainer,
+            actionIconContentColor = p.onSecondaryContainer,
         ),
         navigationIcon = {
             IconButton(onClick = onClose) { Icon(painterResource(R.drawable.ic_close), "取消选择") }
@@ -667,17 +668,18 @@ private fun SelectionTopBar(
 /** 降级横幅：引擎不可用时展示。 */
 @Composable
 private fun ErrorBanner(err: String) {
+    val p = uiPalette()
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
+            containerColor = p.errorContainer,
         ),
     ) {
         Text(
             err,
-            color = MaterialTheme.colorScheme.onErrorContainer,
+            color = p.onErrorContainer,
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(12.dp),
         )
@@ -750,7 +752,7 @@ private fun FirstBuildOverlay(scanned: Long, parsedDocs: Long) {
     Box(
         Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
+            .background(uiPalette().surface.copy(alpha = 0.96f)),
         contentAlignment = Alignment.Center,
     ) {
         Column(

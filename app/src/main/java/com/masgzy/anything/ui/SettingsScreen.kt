@@ -44,14 +44,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -74,13 +70,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.masgzy.anything.AppViewModel
 import com.masgzy.anything.BuildConfig
 import com.masgzy.anything.data.PalettePreset
+import com.masgzy.anything.data.DesignStyle
 import com.masgzy.anything.data.RoleColors
 import com.masgzy.anything.data.ScanPhase
 import com.masgzy.anything.data.ShizukuAccess
 import com.masgzy.anything.data.ThemeMode
 import com.masgzy.anything.log.AppLogger
 import com.masgzy.anything.ui.theme.ColorTupleDefaults
+import com.masgzy.anything.ui.theme.LocalUiMode
 import com.masgzy.anything.ui.theme.PaletteStyle
+import com.masgzy.anything.ui.theme.uiPalette
 
 /**
  * 设置页 —— NPatch 分组连块样式：分组小标题 + 圆角大卡片，
@@ -111,6 +110,7 @@ fun SettingsScreen(
     LaunchedEffect(Unit) { viewModel.refreshPrivCacheStats() }
 
     var showThemeModeDialog by remember { mutableStateOf(false) }
+    var showDesignStyleDialog by remember { mutableStateOf(false) }
     var showPaletteSheet by remember { mutableStateOf(false) }
     var showStyleDialog by remember { mutableStateOf(false) }
     var showSortDialog by remember { mutableStateOf(false) }
@@ -122,18 +122,14 @@ fun SettingsScreen(
         ThemeMode.LIGHT -> "浅色"
         ThemeMode.DARK -> "深色"
     }
+    val designStyleLabel = when (settings.designStyle) {
+        DesignStyle.MATERIAL -> "Material Design 3"
+        DesignStyle.MIUIX -> "Miuix · HyperOS 风格"
+    }
     val sortLabel = if (settings.sortByName) "按名称" else "按时间"
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("设置") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                ),
-            )
-        },
+    AppScaffold(
+        topBar = { AppTopBar("设置") },
     ) { padding ->
         Column(
             Modifier
@@ -151,6 +147,13 @@ fun SettingsScreen(
             SectionHeader("外观")
             GroupCard {
                 PreferenceItem(
+                    icon = painterResource(R.drawable.ic_design_style),
+                    title = "设计风格",
+                    subtitle = designStyleLabel + " · 切换后全应用即时生效",
+                    onClick = { showDesignStyleDialog = true },
+                )
+                GroupDivider()
+                PreferenceItem(
                     icon = painterResource(R.drawable.ic_brightness_6),
                     title = "主题模式",
                     subtitle = modeLabel,
@@ -163,7 +166,7 @@ fun SettingsScreen(
                         title = "动态取色",
                         subtitle = "如果启用，应用颜色将更改为壁纸颜色",
                         trailing = {
-                            Switch(
+                            AppSwitch(
                                 checked = settings.dynamicColor,
                                 onCheckedChange = {
                                     viewModel.updateSettings { s -> s.copy(dynamicColor = it) }
@@ -197,9 +200,9 @@ fun SettingsScreen(
                 PreferenceItem(
                     icon = painterResource(R.drawable.ic_tonality),
                     title = "Amoled模式",
-                    subtitle = "如果启用，在夜间模式下背景色将设为纯黑",
+                    subtitle = "如果启用，在夜间模式下背景色将设为纯黑（仅 Material Design 3）",
                     trailing = {
-                        Switch(
+                        AppSwitch(
                             checked = settings.amoled,
                             onCheckedChange = {
                                 viewModel.updateSettings { s -> s.copy(amoled = it) }
@@ -214,7 +217,7 @@ fun SettingsScreen(
                     subtitle = "底部悬浮胶囊式页签（搜索/目录/设置），默认开启；" +
                         "关闭后改为通栏底栏",
                     trailing = {
-                        Switch(
+                        AppSwitch(
                             checked = settings.showPaginator,
                             onCheckedChange = { viewModel.setShowPaginator(it) },
                         )
@@ -225,13 +228,14 @@ fun SettingsScreen(
                     icon = painterResource(R.drawable.ic_lens_blur),
                     title = "液态玻璃底栏",
                     subtitle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        "底栏玻璃质感：背景模糊 + 折射高光（NPatch 同款实现）"
+                        "底栏玻璃质感：背景模糊 + 折射高光（NPatch 同款实现，" +
+                            "Material Design 3 与 Miuix 风格下均可用）"
                     } else {
                         "需要 Android 13 及以上版本"
                     },
                     enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
                     trailing = {
-                        Switch(
+                        AppSwitch(
                             checked = settings.liquidGlass,
                             onCheckedChange = { viewModel.setLiquidGlass(it) },
                         )
@@ -247,7 +251,7 @@ fun SettingsScreen(
                     title = "进入应用时自动更新索引",
                     subtitle = "增量扫描，仅处理有变动的文件",
                     trailing = {
-                        Switch(
+                        AppSwitch(
                             checked = settings.autoScanOnEnter,
                             onCheckedChange = {
                                 viewModel.updateSettings { s -> s.copy(autoScanOnEnter = it) }
@@ -395,7 +399,7 @@ fun SettingsScreen(
                         subtitle = "进入应用几秒后向 GitHub 查询新版本，发现更新时提醒；" +
                             "关闭后仍可在上方手动检查",
                         trailing = {
-                            Switch(
+                            AppSwitch(
                                 checked = settings.autoCheckUpdates,
                                 onCheckedChange = { v ->
                                     viewModel.updateSettings { s -> s.copy(autoCheckUpdates = v) }
@@ -436,6 +440,20 @@ fun SettingsScreen(
                 viewModel.updateSettings { s -> s.copy(logLevel = lv) }
             },
             onDismiss = { showLogLevelDialog = false },
+        )
+    }
+
+    // ---- 设计风格选择（alpha28，KSU 同款双设计） ----
+    if (showDesignStyleDialog) {
+        OptionsDialog(
+            title = "设计风格",
+            options = listOf(
+                DesignStyle.MATERIAL to "Material Design 3",
+                DesignStyle.MIUIX to "Miuix · HyperOS 风格",
+            ),
+            selected = settings.designStyle,
+            onSelect = { style -> viewModel.setDesignStyle(style) },
+            onDismiss = { showDesignStyleDialog = false },
         )
     }
 
@@ -595,11 +613,16 @@ private fun styleLabel(style: PaletteStyle): String = when (style) {
     PaletteStyle.Content -> "内容"
 }
 
-// ---- 通用组件（NPatch 分组连块样式） ----
+// ---- 通用组件（NPatch 分组连块样式；Miuix 风格经 uiPalette 取 HyperOS 色板） ----
 
-/** 分组小标题（NPatch SmallTitle 观感：主色、字重、卡片上方呼吸感）。 */
+/** 分组小标题（NPatch SmallTitle 观感：主色、字重、卡片上方呼吸感；
+ *  Miuix 风格直接用 miuix SmallTitle，即 HyperOS 设置的分组标题）。 */
 @Composable
 private fun SectionHeader(text: String) {
+    if (LocalUiMode.current == DesignStyle.MIUIX) {
+        top.yukonga.miuix.kmp.basic.SmallTitle(text = text)
+        return
+    }
     Text(
         text,
         style = MaterialTheme.typography.titleSmall,
@@ -615,9 +638,10 @@ private fun SectionHeader(text: String) {
  */
 @Composable
 private fun GroupCard(content: @Composable ColumnScope.() -> Unit) {
+    val p = uiPalette()
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = p.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(content = content)
@@ -630,7 +654,7 @@ private fun GroupDivider() {
     HorizontalDivider(
         modifier = Modifier.padding(start = 68.dp),
         thickness = 0.5.dp,
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+        color = uiPalette().outlineVariant.copy(alpha = 0.5f),
     )
 }
 
@@ -649,6 +673,7 @@ private fun PreferenceItem(
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
+    val p = uiPalette()
     val clickMod = onClick?.let { o ->
         Modifier.clickable(enabled = enabled) { o() }
     } ?: Modifier
@@ -674,7 +699,7 @@ private fun PreferenceItem(
                 Icon(
                     icon,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = p.primary,
                     modifier = Modifier.size(24.dp),
                 )
             }
@@ -685,12 +710,13 @@ private fun PreferenceItem(
                 title,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Medium,
+                color = p.onSurface,
                 modifier = Modifier.alpha(contentAlpha),
             )
             Text(
                 subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = p.onSurfaceVariantSummary,
                 modifier = Modifier.alpha(contentAlpha),
             )
         }
@@ -719,7 +745,7 @@ private fun PulseDot() {
     )
 }
 
-/** 单选弹窗（主题模式 / 排序方式共用）。 */
+/** 单选弹窗（主题模式 / 设计风格 / 排序方式共用）：Miuix 风格走 HyperOS 弹层。 */
 @Composable
 private fun <T> OptionsDialog(
     title: String,
@@ -728,6 +754,10 @@ private fun <T> OptionsDialog(
     onSelect: (T) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    if (LocalUiMode.current == DesignStyle.MIUIX) {
+        MiuixOptionsDialog(title, options, selected, onSelect, onDismiss)
+        return
+    }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
@@ -871,7 +901,7 @@ private fun PaletteSheet(
                 enabled = !dynamicColorOn,
                 onClick = { onInvertColorsChange(!invertColors) },
                 trailing = {
-                    Switch(
+                    AppSwitch(
                         checked = invertColors,
                         onCheckedChange = { onInvertColorsChange(it) },
                         enabled = !dynamicColorOn,

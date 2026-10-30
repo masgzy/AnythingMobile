@@ -26,7 +26,8 @@
 | 功能 | 说明 |
 |------|------|
 | 三页签搜索 | 文件名 / office 文档正文 / 目录名，与原版 Anything 一致 |
-| 底栏导航 | 搜索 / 目录 / 设置三页切换；悬浮胶囊底栏（默认开启，NPatch 同款），液态玻璃质感可开（Android 13+，背景实时模糊 + 折射高光） |
+| 底栏导航 | 搜索 / 目录 / 设置三页切换；悬浮胶囊底栏（默认开启，NPatch 同款），液态玻璃质感可开（Android 13+，背景实时模糊 + 折射高光，**Material Design 3 与 Miuix 风格下均可用**） |
+| 双设计风格 | 设计风格二选一（alpha28，参照 KernelSU）：**Material Design 3**（默认）或 **Miuix · HyperOS 风格**；主色种子/调色板风格/动态取色两套共享，切换即时生效 |
 | 自选搜索目录 | 系统文件夹选择器（SAF / 文件提供器 API）授权任意目录纳入索引；索引范围三模式可选：**全盘+目录** / **仅目录** / **仅全盘**（alpha26） |
 | 文件名秒搜 | 2-gram 倒排索引，边输入边出结果 |
 | 文档全文搜索 | docx / xlsx / pptx / pdf 正文内容也能搜；旧版 .doc / .xls / .ppt / .wps 由内置解析器兜底 |
@@ -162,6 +163,7 @@ Android 11+ 把 `/sdcard/Android/data` 对普通应用隔离，需借助特权�
 - [x] 应用内检查更新 + 关于页跳仓库（alpha24）；中文 PDF UniGB-UCS2 盲区修复（vendor 补丁，alpha24）；Material Symbols 图标迁移（alpha25）
 - [x] 索引范围三模式（全盘+目录 / 仅目录 / 仅全盘）+ Android/data 目录条目化 + 离线版发行渠道（alpha26）
 - [x] 安全审计加固：SAF 解析超时 + zip 解压字节上限、外部路径边界校验、Kotlin CFB 解析器防御、FileProvider 暴露收窄、更新跳转白名单（alpha27）
+- [x] 双设计风格：MD3 / Miuix（HyperOS，miuix-ui）+ 液态玻璃底栏两风格通用（alpha28）
 - [ ] 后续：体验打磨、F-Droid 分发、应用内删除 Android/data 文件（Shizuku）
 
 ## 致谢

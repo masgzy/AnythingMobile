@@ -57,6 +57,7 @@ import com.masgzy.anything.ui.UpdateSheet
 import com.masgzy.anything.ui.WelcomeScreen
 import com.masgzy.anything.ui.log.LogScreen
 import com.masgzy.anything.ui.theme.AnythingTheme
+import com.masgzy.anything.ui.theme.uiPalette
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
@@ -201,11 +202,12 @@ private fun MainShell(
     }
 
     // 液态玻璃门控：与 NPatch 一致，AGSL 折射 shader 需要 Android 13（Tiramisu）
+    // 两种设计风格下均可用（MD3 / Miuix），取样底色随当前风格色板
     val glass = settings.liquidGlass &&
         settings.showPaginator &&
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
     // 页面层录制（玻璃取样源）：surface 打底避免透明区域穿透到窗口
-    val surface = MaterialTheme.colorScheme.surface
+    val surface = uiPalette().surface
     val backdrop = if (glass) {
         rememberLayerBackdrop { drawRect(surface); drawContent() }
     } else {

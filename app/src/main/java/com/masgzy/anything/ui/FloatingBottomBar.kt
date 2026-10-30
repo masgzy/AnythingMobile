@@ -35,6 +35,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import com.masgzy.anything.ui.theme.uiPalette
 import top.yukonga.miuix.kmp.blur.Backdrop
 
 /**
@@ -44,7 +45,8 @@ import top.yukonga.miuix.kmp.blur.Backdrop
  *    悬浮胶囊 + 指示器拖拽动效；液态玻璃开关（Android 13+）启用
  *    LiquidGlass 模式（vibrancy + blur + lens 折射，miuix-blur），
  *    关闭时为 None 模式（纯色悬浮胶囊 + 滑动指示器）；
- *  - 标准形态：通栏贴底（M3 风格，自绘）。
+ *    两种设计风格下均可用，胶囊配色随 uiPalette 取当前风格色板；
+ *  - 标准形态：通栏贴底（自绘；配色同样随设计风格切换）。
  *
  * 悬浮时页面内容延伸到底栏之下（玻璃取样需要），各页滚动列表
  * 用 [FLOATING_BAR_CONTENT_PADDING] 预留尾部空隙。
@@ -91,6 +93,8 @@ fun FloatingBottomBar(
 ) {
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val density = LocalDensity.current
+    // 底栏配色随设计风格：MD3 = material-kolor 色板；Miuix = HyperOS 色板
+    val p = uiPalette()
 
     if (floating) {
         Box(
@@ -117,6 +121,12 @@ fun FloatingBottomBar(
                 } else {
                     FloatingBottomBarMode.None
                 },
+                colors = FloatingBottomBarColors(
+                    containerColor = p.surfaceContainer,
+                    indicatorColor = p.primary,
+                    contentColor = p.onSurface,
+                    activeContentColor = p.primary,
+                ),
                 iconContent = { item, index, previewSelected ->
                     FloatingGlassBottomBarIcon(
                         selected = previewSelected || index == selected,
@@ -133,16 +143,15 @@ fun FloatingBottomBar(
             )
         }
     } else {
-        // —— 通栏贴底（M3 风格自绘）——
-        val cs = MaterialTheme.colorScheme
+        // —— 通栏贴底（自绘；M3 / Miuix 两风格同构，仅色源不同）——
         Surface(
             modifier = modifier
                 .fillMaxWidth()
                 .onSizeChanged {
                     onBarHeight(with(density) { it.height.toDp() } + 8.dp)
                 },
-            color = cs.surfaceContainer,
-            contentColor = cs.onSurface,
+            color = p.surfaceContainer,
+            contentColor = p.onSurface,
             tonalElevation = 0.dp,
         ) {
             Column {
@@ -178,8 +187,8 @@ private fun StandardBarEntry(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val cs = MaterialTheme.colorScheme
-    val tint = if (selected) cs.primary else cs.onSurfaceVariant
+    val p = uiPalette()
+    val tint = if (selected) p.primary else p.onSurfaceVariant
     Column(
         modifier
             .clip(RoundedCornerShape(20.dp))
@@ -194,7 +203,7 @@ private fun StandardBarEntry(
         Box(
             Modifier
                 .background(
-                    if (selected) cs.primaryContainer.copy(alpha = 0.85f) else Color.Transparent,
+                    if (selected) p.primaryContainer.copy(alpha = 0.85f) else Color.Transparent,
                     RoundedCornerShape(16.dp),
                 )
                 .padding(horizontal = 18.dp, vertical = 4.dp),
