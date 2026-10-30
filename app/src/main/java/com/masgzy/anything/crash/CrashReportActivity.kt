@@ -113,7 +113,10 @@ private fun CrashReportContent(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "抱歉！已自动收集崩溃日志。您可以分享日志帮助修复问题（日志仅包含设备信息与堆栈，不含个人文件）。",
+                // 审计 V-5：内容清单如实列全（含 logcat 尾部），知情后分享
+                "抱歉！已自动收集崩溃报告。您可以分享报告帮助修复问题" +
+                    "（报告包含设备信息、崩溃堆栈与本应用最近的运行日志，" +
+                    "不含个人文件；仅在你主动分享后才会发出）。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

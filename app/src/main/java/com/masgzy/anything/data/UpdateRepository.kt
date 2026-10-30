@@ -63,7 +63,10 @@ object UpdateRepository {
                 tagName = o.optString("tag_name").ifBlank { "unknown" },
                 name = o.optString("name"),
                 body = o.optString("body"),
-                htmlUrl = o.optString("html_url").ifBlank { REPO_URL },
+                // 审计 V-6 加固：htmlUrl 白名单 —— 只放行本仓库 URL，
+                // API 返回被篡改时退回仓库主页，杜绝诱导跳转恶意页
+                htmlUrl = o.optString("html_url")
+                    .takeIf { it.startsWith(REPO_URL) } ?: REPO_URL,
             )
         } finally {
             conn.disconnect()

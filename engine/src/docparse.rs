@@ -18,6 +18,15 @@ pub fn err_unsupported_format() -> crate::error::EngineError {
 /// 单文档抽取文本的上限（1MB），超出截断。
 pub(crate) const MAX_EXTRACT_TEXT: usize = 1 << 20;
 
+/// 单个 zip 条目的解压字节读取上限（128MB）。
+///
+/// 审计加固（V-1）：20MB 压缩上限内的 docx 理论解压比可达 1000+:1，
+/// 恶意"无文本大 XML"（解压炸弹）会让流式 XML 扫描器吐完整条流才结束
+/// （正文 1MB 封顶只管输出，不管输入读取耗时）。给条目读取套 `take()`
+/// 后扫描器最多消费 128MB 就见 EOF，把最坏 CPU 从分钟级压回亚秒级；
+/// 提前 EOF 对手写扫描器是"未闭合文档"语义 —— 返回已收集正文，安全降级。
+pub(crate) const MAX_UNCOMPRESSED: u64 = 128 << 20;
+
 /// 抽取内置支持格式（docx/pptx/xlsx/pdf）文档的纯文本。
 pub fn extract_text(path: &str) -> crate::error::EngineResult<String> {
     match crate::textutil::ext_of(path).as_str() {
@@ -57,9 +66,11 @@ fn extract_entries(
     let pt: HashMap<&str, ()> = para_tags.iter().map(|t| (*t, ())).collect();
     let mut sb = String::new();
     for name in &names {
-        let Ok(mut f) = zr.by_name(name) else {
+        let Ok(f) = zr.by_name(name) else {
             continue;
         };
+        // 解压字节上限（审计 V-1，见 MAX_UNCOMPRESSED）
+        let mut f = f.take(MAX_UNCOMPRESSED);
         let text = capture_xml(&mut f, tag, &pt);
         drop(f);
         if !text.trim().is_empty() {
@@ -95,9 +106,11 @@ fn extract_pptx(path: &str) -> crate::error::EngineResult<String> {
     let pt: HashMap<&str, ()> = [("p", ())].into_iter().collect();
     let mut sb = String::new();
     for name in &slides {
-        let Ok(mut f) = zr.by_name(name) else {
+        let Ok(f) = zr.by_name(name) else {
             continue;
         };
+        // 解压字节上限（审计 V-1，见 MAX_UNCOMPRESSED）
+        let mut f = f.take(MAX_UNCOMPRESSED);
         let text = capture_xml(&mut f, "t", &pt);
         drop(f);
         if !text.trim().is_empty() {
@@ -131,9 +144,11 @@ fn extract_xlsx(path: &str) -> crate::error::EngineResult<String> {
         })
         .collect();
     for name in &names {
-        let Ok(mut f) = zr.by_name(name) else {
+        let Ok(f) = zr.by_name(name) else {
             continue;
         };
+        // 解压字节上限（审计 V-1，见 MAX_UNCOMPRESSED）
+        let mut f = f.take(MAX_UNCOMPRESSED);
         let text = capture_xml(&mut f, "t", &pt);
         drop(f);
         if !sb.is_empty() {
@@ -1085,5 +1100,41 @@ mod tests {
         assert_eq!(slide_num("ppt/slides/slide3.xml"), 3);
         assert_eq!(slide_num("ppt/notesSlides/notesSlide10.xml"), 10);
         assert_eq!(slide_num("ppt/slides/slide.xml"), 0);
+    }
+
+    /// 审计 V-1 回归：解压炸弹（压缩比极高的无文本 XML）必须被
+    /// MAX_UNCOMPRESSED 截断快速返回，而不是吐完整条解压流。
+    /// 构造 ~192MB 解压的 document.xml（远超 128MB 上限、压缩后仅数百 KB），
+    /// 无 <w:t> 文本 —— 修复前扫描器需读完 192MB（秒级满核 CPU），修复后
+    /// 读到 128MB 即 EOF，返回空正文。断言耗时 < 5s（修复前 >5s 且随规模线性涨）。
+    #[test]
+    fn zip_bomb_truncated_by_uncompressed_cap() {
+        use std::io::Write;
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("bomb.docx");
+        let f = std::fs::File::create(&p).unwrap();
+        let mut zw = zip::ZipWriter::new(f);
+        zw.start_file(
+            "word/document.xml",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
+        // 一段高重复、零文本的字节块：zip deflate 压缩比 ~1000:1
+        let piece = "<w:p><x a=\"1\"/></w:p>".repeat(100_000);
+        for _ in 0..5 {
+            zw.write_all(piece.as_bytes()).unwrap();
+        }
+        zw.finish().unwrap();
+        let size = std::fs::metadata(&p).unwrap().len();
+        assert!(size < 4 << 20, "炸弹应高度压缩（实际 {size}B）");
+
+        let t0 = std::time::Instant::now();
+        let out = extract_text(p.to_str().unwrap()).unwrap();
+        let elapsed = t0.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "炸弹解析被截断后应亚 5s 返回（实际 {elapsed:?}）"
+        );
+        assert!(out.is_empty(), "无文本炸弹应返回空正文");
     }
 }

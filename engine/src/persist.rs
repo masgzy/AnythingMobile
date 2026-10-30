@@ -261,8 +261,8 @@ mod tests {
         assert_eq!(d2.count(), 1);
         assert_eq!(en2.count(), 1);
         assert_eq!(ed2.count(), 0);
-        assert_eq!(n2.search_all("报告").1, 1);
-        assert_eq!(d2.search_all("下载").1, 1);
+        assert_eq!(n2.search_all("报告", 0).1, 1);
+        assert_eq!(d2.search_all("下载", 0).1, 1);
         let (sizes, mtimes, found) = n2.lookup_batch(&["/x/photo.jpg".into()]);
         assert_eq!((sizes[0], mtimes[0], found[0]), (2048, 222, true));
     }

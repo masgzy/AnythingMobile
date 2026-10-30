@@ -15,8 +15,9 @@ rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
 rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
 
 [build]
-# 桌面构建的通用瘦身参数（Android 交叉编译时按 target 覆盖，不冲突）
-rustflags = ["-C", "overflow-checks=off"]
+# 桌面 dev 构建：保持默认溢出检查（解析不可信输入的代码里整数溢出在
+# 开发期就 panic 暴露，审计 §4.3）。release 由下方 [profile.release]
+# 统一关闭溢出检查，不在此处全局 off —— 那会让 dev 构建也静默回绕。
 
 [profile.release]
 # panic 策略保持默认 unwind：FFI 边界用 catch_unwind 拦截 panic，

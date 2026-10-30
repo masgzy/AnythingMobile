@@ -127,6 +127,13 @@ Android 11+ 把 `/sdcard/Android/data` 对普通应用隔离，需借助特权�
 .doc / .xls / .ppt / .wps 与新版 Office、PDF 一样参与全文搜索。
 个别加密或损坏文档解析失败时，其文件名仍可正常搜索。
 
+**哪些文件能搜"正文"？**
+参与全文索引的格式：`.docx / .xlsx / .pptx / .pdf`（内置解析）+
+`.doc / .xls / .ppt / .wps`（Kotlin 层兜底解析）。**纯文本类
+（.txt / .md / 各类代码文件）、epub 等暂不参与全文索引** —— 这些文件
+只能按文件名搜索。这是与原版 Anything 一致的定位（Office 文档全文），
+如需覆盖更多格式可在 issue 提需求。
+
 **会常驻后台耗电吗？**
 不会。只有你打开应用时才增量更新索引（仅扫描变动部分），平时没有任何后台活动。也可在设置中关闭自动更新。
 
@@ -154,6 +161,7 @@ Android 11+ 把 `/sdcard/Android/data` 对普通应用隔离，需借助特权�
 - [x] M5 Rust FFI 迁移：引擎整体换用 Rust（tantivy + jieba），APK 体积与索引内存大幅下降（alpha20）
 - [x] 应用内检查更新 + 关于页跳仓库（alpha24）；中文 PDF UniGB-UCS2 盲区修复（vendor 补丁，alpha24）；Material Symbols 图标迁移（alpha25）
 - [x] 索引范围三模式（全盘+目录 / 仅目录 / 仅全盘）+ Android/data 目录条目化 + 离线版发行渠道（alpha26）
+- [x] 安全审计加固：SAF 解析超时 + zip 解压字节上限、外部路径边界校验、Kotlin CFB 解析器防御、FileProvider 暴露收窄、更新跳转白名单（alpha27）
 - [ ] 后续：体验打磨、F-Droid 分发、应用内删除 Android/data 文件（Shizuku）
 
 ## 致谢

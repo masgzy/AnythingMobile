@@ -34,6 +34,12 @@ use crate::walker::{self, DirRecord, FileRecord, WalkHooks};
 /// 单个文档参与全文解析的大小上限（Go `maxParseSize` 同款：20MB）。
 pub(crate) const MAX_PARSE_SIZE: usize = 20 << 20;
 
+/// SAF 直连通道（extract_doc）的单文档解析超时（审计 V-1 加固）。
+/// 与扫描流水线的 parsequeue::PARSE_TIMEOUT 同值：超时即放弃全文，
+/// 文件名仍入索引；zip 层另有 128MB 解压字节上限（docparse::MAX_UNCOMPRESSED），
+/// 正常文档不会触达该值 —— 恶意构造的"无文本大 XML"由两层防御共同兜住。
+const DOC_EXTRACT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
 /// 引擎内置解析器支持的扩展名（OOXML 家族 + PDF，Go `builtInParsable` 同款）。
 fn is_builtin_parsable(ext: &str) -> bool {
     matches!(ext, ".docx" | ".pptx" | ".xlsx" | ".pdf")
@@ -590,8 +596,12 @@ impl EngineImpl {
         // 既用于统计真实总数，也用于按配额切片返回。
         // 全文源的验证预算：无过滤器时 limit 足够（配额分配后全文最多贡献
         // limit 条）；带 type:/dir: 过滤时命中会在过滤后被削，预算加倍补偿。
-        let (mut name_all, _) = self.names.search_all(&q);
-        let (mut dir_all, _) = self.dirs.search_all(&q);
+        // 名称/目录源的物化预算（审计 §6.1）：宽泛查询命中可达数万条，
+        // 全量物化的瞬时分配达数十 MB；预算 = max(limit*4, 5000)，
+        // 超限时 total 为下界近似（与全文源 verify_cap 语义对齐）。
+        let name_cap = std::cmp::max(limit as usize * 4, 5000);
+        let (mut name_all, _) = self.names.search_all(&q, name_cap);
+        let (mut dir_all, _) = self.dirs.search_all(&q, name_cap);
         let mut cont_cap = limit as usize;
         if !flt.types.is_empty() || !flt.dirs.is_empty() {
             cont_cap *= 2;
@@ -600,8 +610,8 @@ impl EngineImpl {
         let (ext_name_all, ext_dir_all) = {
             let _g = self.ext_lock.read().ok();
             (
-                self.ext_names.search_all(&q).0,
-                self.ext_dirs.search_all(&q).0,
+                self.ext_names.search_all(&q, name_cap).0,
+                self.ext_dirs.search_all(&q, name_cap).0,
             )
         };
 
@@ -850,8 +860,9 @@ impl EngineImpl {
     /// 从内存数据抽取文档正文（SAF/DocumentsProvider 通道专用）。
     /// 落一个临时文件再走 extract_doc_path 分发 —— 与常规扫描完全同一套
     /// 解析管线（内置 OOXML/PDF + 宿主 ExternalParser 兜底旧版 Office），
-    /// 用毕即删。
-    pub fn extract_doc(&self, name: &str, data: &[u8]) -> EngineResult<String> {
+    /// 用毕即删。`self: &Arc<Self>`（alpha27）：解析移入辅助线程，超时后
+    /// 线程可能存活到最后 —— 需要所有权计数而非借用。
+    pub fn extract_doc(self: &Arc<Self>, name: &str, data: &[u8]) -> EngineResult<String> {
         if data.is_empty() {
             return Ok(String::new());
         }
@@ -883,12 +894,38 @@ impl EngineImpl {
         ));
         std::fs::write(&tmp, data)
             .map_err(|e| EngineError::new(format!("core: 写入临时文件失败: {e}")))?;
-        let text = self.extract_doc_path(
-            tmp.to_string_lossy().as_ref(),
-            &crate::textutil::ext_of(name),
-        );
+        let path = tmp.to_string_lossy().into_owned();
+        let ext = crate::textutil::ext_of(name);
+        // 审计加固（V-1）：SAF 直连通道此前无超时兜底 —— 扫描流水线里单文档
+        // 有 45s 超时（parsequeue），而这条通道直接在调用线程同步解析，恶意
+        // 文档可让前台「同步索引」长时间满核卡顿。与流水线同语义：辅助线程
+        // 解析 + 超时/panic 一律放弃（返回空正文，宿主按"无全文"收录文件名）。
+        let (tx, rx) = std::sync::mpsc::channel();
+        // 闭包要跨线程存活（超时后 detach），捕获 Arc 值而非 &self 借用
+        let engine = Arc::clone(self);
+        let spawned = std::thread::Builder::new()
+            .name("anything-extract-one".to_string())
+            .spawn(move || {
+                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    engine.extract_doc_path(&path, &ext)
+                }));
+                let _ = tx.send(r.ok().flatten().unwrap_or_default());
+            });
+        // 超时后辅助线程仍在后台自旋至自然结束（tmp 已被删除，读取失败即退），
+        // 不 join —— 本调用按超时放弃，最坏损失一个 detach 线程。
+        let text = if spawned.is_ok() {
+            match rx.recv_timeout(DOC_EXTRACT_TIMEOUT) {
+                Ok(t) => t,
+                Err(_) => {
+                    self.notify_error("index", "core: 单文档解析超时，已跳过");
+                    String::new()
+                }
+            }
+        } else {
+            String::new() // 线程创建失败：放弃全文，仅收录文件名
+        };
         let _ = std::fs::remove_file(&tmp);
-        Ok(text.unwrap_or_default())
+        Ok(text)
     }
 
     /// 按扩展名选择解析通道（内置 OOXML / 宿主兜底 / 暂不支持），
@@ -1112,7 +1149,11 @@ fn valid_external_path(p: &str, root: &str) -> bool {
     if p.is_empty() || p.contains('\n') || p.contains('\r') {
         return false;
     }
-    if !root.is_empty() && !p.starts_with(root) {
+    // 前缀校验带路径边界（审计 V-2）：`/a/data` 的裸 starts_with 会放过
+    // `/a/data_evil/x` 这类前缀兄弟目录；root 先归一化去尾斜杠，再要求
+    // p 要么就是 root，要么紧跟 `/`。
+    let root = root.trim_end_matches('/');
+    if !root.is_empty() && !(p == root || p.starts_with(&format!("{root}/"))) {
         return false;
     }
     let rest = p.strip_prefix(root).unwrap_or(p);
@@ -1457,6 +1498,13 @@ mod tests {
         assert!(!valid_external_path("", "/r"));
         assert!(!valid_external_path("/r/x\ny", "/r"));
         assert!(valid_external_path("/r/x", ""));
+        // 审计 V-2：前缀兄弟目录必须被拒，根本身与根内路径放行
+        assert!(!valid_external_path("/r_evil/x", "/r"));
+        assert!(valid_external_path("/r", "/r"));
+        assert!(valid_external_path("/r/sub/x", "/r"));
+        // root 带尾斜杠：归一化后语义一致
+        assert!(valid_external_path("/r/sub/x", "/r/"));
+        assert!(!valid_external_path("/r_evil/x", "/r/"));
     }
 
     #[test]

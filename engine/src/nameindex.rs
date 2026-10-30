@@ -232,14 +232,18 @@ impl NameIndex {
     /// 按子串查询名称，结果按"名称更短优先、修改时间更新优先"排序，
     /// 截断到 limit。
     pub fn search(&self, q: &str, limit: usize) -> Vec<FileHit> {
-        let mut hits = self.search_all(q).0;
+        let mut hits = self.search_all(q, 0).0;
         hits.truncate(limit);
         hits
     }
 
-    /// 返回全部命中（已排序，不截断），便于调用方统计真实命中总数
-    /// 并按配额二次切片（Go `searchAll` 同款）。
-    pub fn search_all(&self, q: &str) -> (Vec<FileHit>, usize) {
+    /// 返回命中（已排序）与命中总数。`cap > 0` 时收集到 cap 条即止，
+    /// total 为"已收集数"（下界近似）—— 审计加固（§6.1）：宽泛查询
+    /// （如 `type:video`）在 50 万文件库可命中数万条，全量物化的瞬时
+    /// 分配达数十 MB，低端机多任务场景有 LMK 风险；调用方（engine::search）
+    /// 传 max(limit*4, 5000)，命中超限时总数语义降为下界（与全文源的
+    /// verify_cap 行为对齐）。`cap == 0` 不设限（持久化导出等内部调用）。
+    pub fn search_all(&self, q: &str, cap: usize) -> (Vec<FileHit>, usize) {
         let ql = crate::textutil::lower_simple(q.trim());
         if ql.is_empty() {
             return (Vec::new(), 0);
@@ -262,6 +266,11 @@ impl NameIndex {
                 continue;
             }
             if doc.lower.contains(&ql) {
+                if cap > 0 && hits.len() >= cap {
+                    // 已达预算：命中数显然超过 cap，不再继续物化。
+                    // total 语义降为下界（调用方 UI 显示近似总数）。
+                    break;
+                }
                 hits.push(FileHit {
                     path: doc.path.clone(),
                     name: doc.name.clone(),
@@ -346,7 +355,7 @@ mod tests {
         idx.add("/x/longer_name.txt", 1, 100);
         idx.add("/x/短.txt", 2, 300);
         idx.add("/x/mid_name.txt", 3, 200);
-        let (hits, total) = idx.search_all("name");
+        let (hits, total) = idx.search_all("name", 0);
         assert_eq!(total, 2);
         // 名称更短优先：mid_name(12) < longer_name(15)
         assert_eq!(hits[0].name, "mid_name.txt");
@@ -360,7 +369,7 @@ mod tests {
         let idx = NameIndex::new("file");
         idx.add("/x/a.txt", 1, 100);
         idx.add("/x/b.txt", 1, 200);
-        let (hits, _) = idx.search_all(".txt");
+        let (hits, _) = idx.search_all(".txt", 0);
         assert_eq!(hits[0].name, "b.txt", "同长取 mtime 更新者");
     }
 
@@ -368,13 +377,13 @@ mod tests {
     fn case_insensitive_substring() {
         let idx = NameIndex::new("file");
         idx.add("/x/Report.PDF", 1, 1);
-        assert_eq!(idx.search_all("report").1, 1);
-        assert_eq!(idx.search_all("PDF").1, 1);
+        assert_eq!(idx.search_all("report", 0).1, 1);
+        assert_eq!(idx.search_all("PDF", 0).1, 1);
         // 中文 bigram
         idx.add("/x/会议纪要.docx", 1, 1);
-        assert_eq!(idx.search_all("会议").1, 1);
-        assert_eq!(idx.search_all("议纪").1, 1, "跨字符 bigram 命中");
-        assert_eq!(idx.search_all("会要").1, 0, "非连续子串不命中");
+        assert_eq!(idx.search_all("会议", 0).1, 1);
+        assert_eq!(idx.search_all("议纪", 0).1, 1, "跨字符 bigram 命中");
+        assert_eq!(idx.search_all("会要", 0).1, 0, "非连续子串不命中");
     }
 
     #[test]
@@ -382,10 +391,10 @@ mod tests {
         let idx = NameIndex::new("file");
         idx.add("/x/a.txt", 1, 1);
         idx.add("/x/ba.txt", 1, 1);
-        assert_eq!(idx.search_all("a").1, 2);
-        assert_eq!(idx.search_all("中").1, 0);
+        assert_eq!(idx.search_all("a", 0).1, 2);
+        assert_eq!(idx.search_all("中", 0).1, 0);
         idx.add("/x/中文.txt", 1, 1);
-        assert_eq!(idx.search_all("文").1, 1);
+        assert_eq!(idx.search_all("文", 0).1, 1);
     }
 
     #[test]
@@ -394,7 +403,7 @@ mod tests {
         idx.add("/x/report.docx", 1, 1);
         idx.add("/x/report.docx", 2, 9); // 同路径重复加入
         assert_eq!(idx.count(), 1);
-        let (hits, _) = idx.search_all("report");
+        let (hits, _) = idx.search_all("report", 0);
         assert_eq!(hits[0].size, 2);
         assert_eq!(hits[0].mtime, 9);
     }
@@ -430,7 +439,7 @@ mod tests {
     fn add_named_supports_uri_paths() {
         let idx = NameIndex::new("folder");
         idx.add_named("content://com.android.providers/term", "自定义名", 0, 5);
-        let (hits, total) = idx.search_all("自定义");
+        let (hits, total) = idx.search_all("自定义", 0);
         assert_eq!(total, 1);
         assert_eq!(hits[0].kind, "folder");
     }
@@ -454,10 +463,10 @@ mod tests {
         idx.add("/x/a.txt", 1, 1);
         idx.reset();
         assert_eq!(idx.count(), 0);
-        assert_eq!(idx.search_all("a").1, 0);
+        assert_eq!(idx.search_all("a", 0).1, 0);
         // reset 后可继续使用
         idx.add("/x/b.txt", 1, 1);
-        assert_eq!(idx.search_all("b").1, 1);
+        assert_eq!(idx.search_all("b", 0).1, 1);
     }
 
     #[test]
@@ -469,7 +478,7 @@ mod tests {
         let dst = NameIndex::new("folder");
         dst.import_records(&recs);
         assert_eq!(dst.count(), 2);
-        assert_eq!(dst.search_all("中文").1, 1);
+        assert_eq!(dst.search_all("中文", 0).1, 1);
         let (sizes, mtimes, _) = dst.lookup_batch(&["/d/sub2".into()]);
         assert_eq!((sizes[0], mtimes[0]), (0, 42));
     }

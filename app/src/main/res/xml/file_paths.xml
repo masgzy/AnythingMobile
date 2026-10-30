@@ -2,7 +2,9 @@
 <paths>
     <!-- FileProvider：分享搜索到的文件时使用 -->
     <external-path name="shared_files" path="." />
-    <cache-path name="cache" path="." />
+    <!-- cache 收窄到 Shizuku 特权导出子目录（审计 V-3）：全 cache 暴露面
+         过大，实际分享只有 shizuku_export/ 副本这一个用途 -->
+    <cache-path name="cache" path="shizuku_export/" />
     <!-- 崩溃日志（filesDir/crash/） -->
     <files-path name="crash" path="crash/" />
     <!-- 调试日志导出（filesDir/logs/，alpha22） -->

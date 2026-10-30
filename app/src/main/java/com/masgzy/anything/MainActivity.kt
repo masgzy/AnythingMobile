@@ -144,7 +144,15 @@ private fun Root(
         AlertDialog(
             onDismissRequest = { },
             title = { Text("检测到上次崩溃") },
-            text = { Text("上次运行发生异常，是否分享崩溃日志帮助修复？") },
+            text = {
+                Text(
+                    // 审计 V-5：明示分享内容含设备信息与本应用 logcat 尾部，
+                    // 用户知情后再决定（logcat 只含本应用自己的日志，但知情度先行）
+                    "上次运行发生异常，是否分享崩溃报告帮助修复？" +
+                        "报告包含设备信息、崩溃堆栈与本应用最近的运行日志（logcat 尾部），" +
+                        "仅在你主动分享后才会发出。",
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     CrashReporter.shareReport(activityContext)

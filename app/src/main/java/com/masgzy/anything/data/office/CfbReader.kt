@@ -46,15 +46,21 @@ internal class CfbReader(private val data: ByteArray) {
         val firstDifat = readUInt(0x44)
         val numDifat = readUInt(0x48)
 
-        // DIFAT：头部 109 项 + DIFAT 扇区链（每扇区末尾 u32 为下一 DIFAT 扇区）
+        // DIFAT：头部 109 项 + DIFAT 扇区链（每扇区末尾 u32 为下一 DIFAT 扇区）。
+        // 审计加固（V-4）：恶意 .doc 可构造自环 DIFAT + 巨大 numDifat，
+        // 让 fatSectorIds 无界增长直至 OOM —— 加环检测（seen 集）与
+        // 物理上限（FAT 扇区数不可能超过文件扇区总数）。
         val fatSectorIds = ArrayList<Int>(numFatSectors.coerceIn(0, 1 shl 20) + 8)
+        val maxFatSectors = data.size / sectorSize + 1
         for (i in 0 until 109) {
             val v = readUInt(0x4C + i * 4)
             if (isDataSector(v)) fatSectorIds.add(v)
         }
         var difat = firstDifat
         var difatLeft = numDifat
-        while (difat != ENDOFCHAIN && difatLeft > 0) {
+        val seenDifat = HashSet<Int>()
+        while (difat != ENDOFCHAIN && difatLeft > 0 &&
+            seenDifat.add(difat) && fatSectorIds.size < maxFatSectors) {
             val base = sectorOffset(difat)
             if (base + sectorSize > data.size) break
             for (i in 0 until sectorSize / 4 - 1) {
@@ -123,8 +129,15 @@ internal class CfbReader(private val data: ByteArray) {
 
     // ---- 内部实现 ----
 
-    private fun isDataSector(v: Int) = v != ENDOFCHAIN && v != FREESECT &&
-        v != 0xFFFFFFFC.toInt() && v != 0xFFFFFFFD.toInt()
+    /**
+     * 合法数据扇区号（审计 V-4 加固）：CFB 里扇区号必须是 [0, 0xFFFFFFFA]
+     * 的非负值 —— 0xFFFFFFFB..0xFFFFFFFF 全部是保留值
+     *（DIFSECT/FATSECT/ENDOFCHAIN/FREESECT），其余负数同为非法。
+     * 旧实现只挡四个保留值，放过的负数扇区号经 sectorOffset 产出负偏移，
+     * 最终在 readUIntAt → u16 → 数组负索引抛 AIOOBE（被下游宽泛 catch 兜住，
+     * 但防线应立在解析器自身）。这里直接拒绝一切负值，覆盖全部保留值。
+     */
+    private fun isDataSector(v: Int) = v >= 0
 
     /** 签名 D0 CF 11 E0 A1 B1 1A E1（逐字节比较，避免 Long 补码换算）。 */
     private fun hasCfbSignature(b: ByteArray): Boolean {
