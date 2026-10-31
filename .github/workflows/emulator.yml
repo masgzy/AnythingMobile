@@ -217,14 +217,20 @@ jobs:
 
       # ---------- 产物 ----------
 
-      - name: 上传模拟器截图（直传）
+      # v7 的 archive: false 仅支持单文件，两张截图分两个 step 直传
+      - name: 上传主界面截图（直传）
         if: always()
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: |
-            anything-emulator-home.png
-            anything-emulator-settings.png
+          path: anything-emulator-home.png
+
+      - name: 上传设置页截图（直传）
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: anything-emulator-settings.png
 
       - name: 失败时收集现场
         if: failure()
