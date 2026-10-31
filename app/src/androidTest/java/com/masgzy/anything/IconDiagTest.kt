@@ -61,16 +61,6 @@ class IconDiagTest {
                     .padding(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // framework VectorDrawable 渲染对照（Android 原生 ImageView）
-                androidx.compose.ui.viewinterop.AndroidView(
-                    factory = { ctx ->
-                        android.widget.ImageView(ctx).apply {
-                            setImageResource(R.drawable.ic_brightness_6)
-                            setColorFilter(0xFFFF0000.toInt())
-                        }
-                    },
-                    modifier = Modifier.size(64.dp),
-                )
                 cases.chunked(4).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         row.forEach { (name, res) ->
@@ -94,6 +84,21 @@ class IconDiagTest {
                 }
             }
         }
+        // framework VectorDrawable 渲染对照放在网格末尾（不占统计窗口）
+        val frameworkPx = android.graphics.Bitmap.createBitmap(96, 96, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(frameworkPx)
+        val dr = rule.activity.getDrawable(R.drawable.ic_brightness_6)!!
+        dr.setBounds(8, 8, 88, 88)
+        dr.setColorFilter(0xFFFF0000.toInt(), android.graphics.PorterDuff.Mode.SRC_IN)
+        dr.draw(canvas)
+        var fw = 0
+        var yy = 0
+        while (yy < 96) { var xx = 0; while (xx < 96) {
+            val pxx = frameworkPx.getPixel(xx, yy)
+            if (((pxx shr 16) and 0xFF) > 150 && ((pxx shr 8) and 0xFF) < 120) fw++
+            xx += 2 }; yy += 2 }
+        Log.i("IconDiag", "RESULT framework_imageview coloredPx=$fw")
+
         rule.waitForIdle()
         Thread.sleep(500)
         val bmp = rule.onRoot().captureToImage().asAndroidBitmap()
