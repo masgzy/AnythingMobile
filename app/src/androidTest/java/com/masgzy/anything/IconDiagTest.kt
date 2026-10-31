@@ -40,7 +40,7 @@ import org.junit.runner.RunWith
 class IconDiagTest {
 
     @get:Rule
-    val rule = createAndroidComposeRule<androidx.activity.ComponentActivity>()
+    val rule = createAndroidComposeRule<com.masgzy.anything.DiagActivity>()
 
     private val cases = listOf(
         "design_style_hand" to R.drawable.ic_design_style,

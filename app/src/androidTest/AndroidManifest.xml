@@ -1,10 +1,3 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 仪器化测试专用：createAndroidComposeRule 需要一个可启动的 ComponentActivity
-     （IconDiagTest 的诊断网格宿主；主 APK manifest 不受影响）。 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:supportsRtl="true">
-        <activity
-            android:name="androidx.activity.ComponentActivity"
-            android:exported="false" />
-    </application>
-</manifest>
+<!-- 诊断宿主 DiagActivity 注册在主 APK（见主 manifest）；此文件仅声明合并占位。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

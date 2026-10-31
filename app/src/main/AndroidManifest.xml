@@ -48,6 +48,11 @@
             </intent-filter>
         </activity>
 
+        <!-- 仪器化诊断专用（androidTest IconDiagTest 宿主，exported=false 用户不可见） -->
+        <activity
+            android:name=".DiagActivity"
+            android:exported="false" />
+
         <!-- 崩溃报告页：独立进程运行，主进程 OOM 崩溃时也能展示/分享日志 -->
         <activity
             android:name=".crash.CrashReportActivity"
