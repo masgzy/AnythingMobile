@@ -104,6 +104,10 @@ private fun Root(
     onRequestAllFiles: () -> Unit,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    // pager 状态提升到主题之外（alpha30）：AnythingTheme 的 MD3/Miuix 两分支
+    // 组合树形状不同（MiuixTheme 包装层出现/消失），风格切换会重建主题内
+    // 的全部 remember 状态 —— 不提升的话切风格会被甩回搜索页
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
     AnythingTheme(settings = settings) {
         // 首启引导后进入主壳；设置页「重看引导」可回跳。
         // 引导 ⇄ 主壳为栈式过渡（引导从下方推入，完成时向上收回），
@@ -130,7 +134,12 @@ private fun Root(
                     showWelcome = false
                 })
             } else {
-                MainShell(viewModel, onRequestAllFiles, onShowWelcome = { showWelcome = true })
+                MainShell(
+                    viewModel,
+                    onRequestAllFiles,
+                    onShowWelcome = { showWelcome = true },
+                    pagerState = pagerState,
+                )
             }
         }
     }
@@ -185,10 +194,10 @@ private fun MainShell(
     viewModel: AppViewModel,
     onRequestAllFiles: () -> Unit,
     onShowWelcome: () -> Unit,
+    pagerState: androidx.compose.foundation.pager.PagerState,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
     var showSyntaxHelp by rememberSaveable { mutableStateOf(false) }
     var showLog by rememberSaveable { mutableStateOf(false) }
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()

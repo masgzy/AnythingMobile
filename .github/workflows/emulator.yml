@@ -229,11 +229,15 @@ jobs:
           ls -lh anything-emulator-settings.png
 
           # ③ 设置页 · Miuix（设计风格 → 弹窗选项「Miuix · HyperOS 风格」；
-          #    精确匹配防命中行副标题的后缀长文案；点失败只告警不阻塞）
+          #    精确匹配防命中行副标题的后缀长文案；点失败只告警不阻塞。
+          #    截图前回点「设置」tab：即使风格切换导致状态重置回到搜索页，
+          #    也能保证截到的是设置页）
           if tap_text "设计风格"; then
             sleep 2
             tap_text "Miuix · HyperOS 风格" || true
             sleep 4
+            adb shell input tap $((W*77/100)) $((H*96/100))
+            sleep 3
             adb exec-out screencap -p > anything-emulator-settings-miuix.png
             ls -lh anything-emulator-settings-miuix.png
           else
