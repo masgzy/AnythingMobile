@@ -49,9 +49,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.masgzy.anything.AppViewModel
 import com.masgzy.anything.data.IndexScope
+import com.masgzy.anything.data.DesignStyle
+import com.masgzy.anything.ui.theme.LocalUiMode
 import com.masgzy.anything.ui.theme.uiPalette
 import com.masgzy.anything.data.IndexStats
 import com.masgzy.anything.data.SafDirs
@@ -112,15 +115,23 @@ fun DirectoryScreen(
         Unit
     }
 
+    val topBarScroll = rememberAppTopBarScrollBehavior()
     Column(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .then(
+                topBarScroll?.let { Modifier.nestedScroll(it.nestedScrollConnection) } ?: Modifier
+            ),
     ) {
-        AppTopBar("目录")
+        AppTopBar("目录", scrollBehavior = topBarScroll)
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
-                start = 12.dp, end = 12.dp, top = 4.dp,
+                // MD3 = 16dp（KSU 分段卡同款边距）；Miuix = 12dp（NPatch 卡边距）
+                start = if (LocalUiMode.current == DesignStyle.MIUIX) 12.dp else 16.dp,
+                end = if (LocalUiMode.current == DesignStyle.MIUIX) 12.dp else 16.dp,
+                top = 4.dp,
                 // 悬浮底栏实测占位：滚动到底时最后一项不被遮挡
                 bottom = 24.dp + LocalFloatingBarPadding.current,
             ),
@@ -131,9 +142,9 @@ fun DirectoryScreen(
                 IndexStatusCard(stats = indexStats, scanning = scanning)
             }
 
-            // ---- 三步引导（解决"看不懂怎么用"） ----
+            // ---- 三步引导（解决"看不懂怎么用"；MD3 = 整体内容卡） ----
             item(key = "guide") {
-                GroupCard {
+                GroupCard(single = true) {
                     Text(
                         "怎么用",
                         style = MaterialTheme.typography.titleSmall,
@@ -310,9 +321,9 @@ fun DirectoryScreen(
                 }
             }
 
-            // ---- 补充说明（收纳为可读小字） ----
+            // ---- 补充说明（收纳为可读小字；MD3 = 整体内容卡） ----
             item(key = "hint") {
-                GroupCard {
+                GroupCard(single = true) {
                     Row(
                         Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.Top,
@@ -344,34 +355,36 @@ fun DirectoryScreen(
 private fun DirectoryRow(uriStr: String, onRemove: () -> Unit) {
     val context = LocalContext.current
     var valid by remember(uriStr) { mutableStateOf(true) }
-    ListItem(
-        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-        leadingContent = {
-            Icon(
-                if (valid) painterResource(R.drawable.ic_folder) else painterResource(R.drawable.ic_folder_off),
-                null,
-                tint = if (valid) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.error,
-            )
-        },
-        headlineContent = { Text(SafDirs.displayName(uriStr)) },
-        supportingContent = {
-            Text(
-                if (valid) {
-                    SafDirs.treeToPath(context, uriStr) ?: SafDirs.subPath(uriStr)
-                } else {
-                    "授权已失效（目录被移动或权限被回收），请删除后重新添加"
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        trailingContent = {
-            IconButton(onClick = onRemove) {
-                Icon(painterResource(R.drawable.ic_close), "移除", modifier = Modifier.size(18.dp))
-            }
-        },
-    )
+    Md3ItemCard {
+        ListItem(
+            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+            leadingContent = {
+                Icon(
+                    if (valid) painterResource(R.drawable.ic_folder) else painterResource(R.drawable.ic_folder_off),
+                    null,
+                    tint = if (valid) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.error,
+                )
+            },
+            headlineContent = { Text(SafDirs.displayName(uriStr)) },
+            supportingContent = {
+                Text(
+                    if (valid) {
+                        SafDirs.treeToPath(context, uriStr) ?: SafDirs.subPath(uriStr)
+                    } else {
+                        "授权已失效（目录被移动或权限被回收），请删除后重新添加"
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            trailingContent = {
+                IconButton(onClick = onRemove) {
+                    Icon(painterResource(R.drawable.ic_close), "移除", modifier = Modifier.size(18.dp))
+                }
+            },
+        )
+    }
     // 首次进入列表时探测授权有效性（NPatch 用时校验模式）
     LaunchedEffect(uriStr) {
         valid = SafDirs.isValid(context, uriStr)
@@ -381,22 +394,24 @@ private fun DirectoryRow(uriStr: String, onRemove: () -> Unit) {
 /** 三选一的范围单选行（GroupCard 内使用：RadioButton + 标题/说明）。 */
 @Composable
 private fun ScopeRow(title: String, desc: String, selected: Boolean, onClick: () -> Unit) {
-    ListItem(
-        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-        leadingContent = {
-            RadioButton(selected = selected, onClick = onClick)
-        },
-        headlineContent = {
-            Text(
-                title,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                color = if (selected) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurface,
-            )
-        },
-        supportingContent = { Text(desc) },
-        modifier = Modifier.clickable(onClick = onClick),
-    )
+    Md3ItemCard {
+        ListItem(
+            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+            leadingContent = {
+                RadioButton(selected = selected, onClick = onClick)
+            },
+            headlineContent = {
+                Text(
+                    title,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface,
+                )
+            },
+            supportingContent = { Text(desc) },
+            modifier = Modifier.clickable(onClick = onClick),
+        )
+    }
 }
 
 /**
@@ -412,50 +427,52 @@ private fun AndroidDataRow(
     onRequestPermission: () -> Unit,
     onOpenDownload: () -> Unit,
 ) {
-    ListItem(
-        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-        leadingContent = {
-            Icon(
-                painterResource(R.drawable.ic_folder_special),
-                null,
-                tint = if (enabled) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
-        headlineContent = { Text("Android/data（应用数据目录）") },
-        supportingContent = {
-            Text(
-                when {
-                    enabled && shizukuStatus == ShizukuAccess.Status.GRANTED ->
-                        "已收录 $externalCount 项 · 仅文件名不含全文"
-                    enabled && shizukuStatus == ShizukuAccess.Status.NEED_PERMISSION ->
-                        "已开启 · 点此发起 Shizuku / Stellar 授权"
-                    enabled -> "已开启 · 但 Shizuku / Stellar 未运行，点此前往下载"
-                    else -> "开启后经 Shizuku / Stellar 特权收录（Android 11+ 隔离区）"
-                },
-            )
-        },
-        trailingContent = {
-            Switch(
-                checked = enabled,
-                onCheckedChange = { on ->
+    Md3ItemCard {
+        ListItem(
+            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+            leadingContent = {
+                Icon(
+                    painterResource(R.drawable.ic_folder_special),
+                    null,
+                    tint = if (enabled) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            headlineContent = { Text("Android/data（应用数据目录）") },
+            supportingContent = {
+                Text(
                     when {
-                        !on -> onToggle(false)
-                        shizukuStatus == ShizukuAccess.Status.GRANTED -> onToggle(true)
-                        else -> {
-                            // 未授权：先开启（状态记忆），再引导授权/下载
-                            onToggle(true)
-                            if (shizukuStatus == ShizukuAccess.Status.NOT_RUNNING) {
-                                onOpenDownload()
-                            } else {
-                                onRequestPermission()
+                        enabled && shizukuStatus == ShizukuAccess.Status.GRANTED ->
+                            "已收录 $externalCount 项 · 仅文件名不含全文"
+                        enabled && shizukuStatus == ShizukuAccess.Status.NEED_PERMISSION ->
+                            "已开启 · 点此发起 Shizuku / Stellar 授权"
+                        enabled -> "已开启 · 但 Shizuku / Stellar 未运行，点此前往下载"
+                        else -> "开启后经 Shizuku / Stellar 特权收录（Android 11+ 隔离区）"
+                    },
+                )
+            },
+            trailingContent = {
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = { on ->
+                        when {
+                            !on -> onToggle(false)
+                            shizukuStatus == ShizukuAccess.Status.GRANTED -> onToggle(true)
+                            else -> {
+                                // 未授权：先开启（状态记忆），再引导授权/下载
+                                onToggle(true)
+                                if (shizukuStatus == ShizukuAccess.Status.NOT_RUNNING) {
+                                    onOpenDownload()
+                                } else {
+                                    onRequestPermission()
+                                }
                             }
                         }
-                    }
-                },
-            )
-        },
-    )
+                    },
+                )
+            },
+        )
+    }
 }
 
 /** 三步引导行：数字圆徽 + 图标 + 标题/说明。 */
@@ -512,7 +529,7 @@ private fun ScanProgressCard(
     firstBuild: Boolean,
     onCancel: () -> Unit,
 ) {
-    GroupCard {
+    GroupCard(single = true) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
             Text(
                 if (firstBuild) "正在建立索引" else "正在更新索引",
@@ -649,36 +666,84 @@ private fun IndexStatusCard(stats: IndexStats?, scanning: Boolean) {
     }
 }
 
-/** 分组小标题。 */
+/** 分组小标题：Miuix 用 miuix SmallTitle（HyperOS 分组标题）；MD3 主色左对齐。 */
 @Composable
 private fun SectionHeader(text: String) {
+    if (LocalUiMode.current == DesignStyle.MIUIX) {
+        top.yukonga.miuix.kmp.basic.SmallTitle(text = text)
+        return
+    }
     Text(
         text,
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+        modifier = Modifier.padding(start = 16.dp, top = 2.dp),
     )
 }
 
-/** 分组连块卡片（NPatch Card 同构）。 */
+/**
+ * 分组容器，按设计风格分派（与 SettingsScreen 同一语言）：
+ *  - Miuix：20dp 大圆角连块卡（NPatch/HyperOS 观感）；
+ *  - MD3：[single] 为 true（引导/提示/进度等整体内容卡）时整块一张
+ *    16dp 圆角卡；否则只提供 4dp 间距，由行组件各自带独立圆角卡，
+ *    项与项彼此分隔开（ImageToolbox 同款）。
+ */
 @Composable
-private fun GroupCard(content: @Composable ColumnScope.() -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(content = content)
+private fun GroupCard(single: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    if (LocalUiMode.current == DesignStyle.MIUIX) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(content = content)
+        }
+    } else if (single) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(content = content)
+        }
+    } else {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            content = content,
+        )
     }
 }
 
-/** 连块内分割线（左端缩进）。 */
+/** 分组分隔：MD3 无分割线（独立卡 4dp 间距即分隔）；Miuix 0.5dp 细线。 */
 @Composable
 private fun GroupDivider() {
+    if (LocalUiMode.current != DesignStyle.MIUIX) {
+        return
+    }
     HorizontalDivider(
         modifier = Modifier.padding(start = 56.dp),
         thickness = 0.5.dp,
         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
     )
+}
+
+/** MD3 行容器：独立 16dp 圆角卡（行组件在 MD3 分支自包裹；Miuix 直通）。 */
+@Composable
+private fun Md3ItemCard(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    if (LocalUiMode.current == DesignStyle.MIUIX) {
+        content()
+    } else {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            modifier = modifier.fillMaxWidth(),
+        ) {
+            content()
+        }
+    }
 }

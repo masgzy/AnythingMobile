@@ -16,16 +16,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
+import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -44,13 +47,19 @@ import com.masgzy.anything.ui.theme.uiPalette
  * 屏幕代码只写一份，风格切换零散分支。
  */
 
-/** 页面骨架：M3 Scaffold 与 miuix Scaffold 派发（两者 content 语义一致）。 */
+/** 页面骨架：M3 Scaffold 与 miuix Scaffold 派发（两者 content 语义一致）。
+ *
+ * [scrollBehavior] 仅 MATERIAL 分支消费：把顶栏的 nestedScroll 接进
+ * Scaffold（大标题随内容滚动折叠）；MIUIX 顶栏无折叠概念，传了也忽略。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppScaffold(
     topBar: @Composable () -> Unit = {},
     modifier: Modifier = Modifier,
     containerColor: Color = uiPalette().surface,
     bottomBar: @Composable () -> Unit = {},
+    scrollBehavior: TopAppBarScrollBehavior? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     if (LocalUiMode.current == DesignStyle.MIUIX) {
@@ -63,7 +72,9 @@ fun AppScaffold(
         )
     } else {
         androidx.compose.material3.Scaffold(
-            modifier = modifier,
+            modifier = modifier.then(
+                scrollBehavior?.let { Modifier.nestedScroll(it.nestedScrollConnection) } ?: Modifier
+            ),
             topBar = topBar,
             bottomBar = bottomBar,
             containerColor = containerColor,
@@ -73,9 +84,23 @@ fun AppScaffold(
 }
 
 /**
+ * MD3 大标题顶栏的滚动行为。Miuix 风格无折叠顶栏概念返回 null，
+ * 屏幕侧拿到的可空值直接透传 [AppScaffold]/[AppTopBar] 即可。
+ * （KSU Material 同款：TopAppBarDefaults.exitUntilCollapsedScrollBehavior）
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun rememberAppTopBarScrollBehavior(): TopAppBarScrollBehavior? {
+    if (LocalUiMode.current == DesignStyle.MIUIX) return null
+    return TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
+}
+
+/**
  * 页面顶栏：普通标题页（设置/目录/日志/教程）双风格派发。
- * MIUIX 走 miuix SmallTopAppBar（HyperOS 顶栏几何与配色）；
- * MATERIAL 走 M3 TopAppBar。搜索页的自定义搜索框顶栏不在此列。
+ * MIUIX 走 miuix SmallTopAppBar（HyperOS 顶栏几何与配色，小标题）；
+ * MATERIAL 走 M3 LargeTopAppBar（大标题 + 随滚动折叠到小标题，
+ * KSU Material / ImageToolbox 的 MD3 观感标志）。
+ * 搜索页的自定义搜索框顶栏不在此列。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,6 +109,7 @@ fun AppTopBar(
     modifier: Modifier = Modifier,
     navigationIcon: (@Composable () -> Unit)? = null,
     actions: @Composable () -> Unit = {},
+    scrollBehavior: TopAppBarScrollBehavior? = null,
 ) {
     val p = uiPalette()
     if (LocalUiMode.current == DesignStyle.MIUIX) {
@@ -96,17 +122,19 @@ fun AppTopBar(
             actions = { actions() },
         )
     } else {
-        TopAppBar(
+        LargeTopAppBar(
             title = { Text(title) },
             modifier = modifier,
             navigationIcon = { navigationIcon?.invoke() },
             actions = { actions() },
-            colors = TopAppBarDefaults.topAppBarColors(
+            colors = TopAppBarDefaults.largeTopAppBarColors(
                 containerColor = p.surface,
+                scrolledContainerColor = p.surface,
                 titleContentColor = p.onSurface,
                 navigationIconContentColor = p.onSurface,
                 actionIconContentColor = p.onSurface,
             ),
+            scrollBehavior = scrollBehavior,
         )
     }
 }

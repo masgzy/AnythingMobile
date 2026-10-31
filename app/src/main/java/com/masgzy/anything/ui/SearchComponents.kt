@@ -102,14 +102,25 @@ fun iconResFor(hit: UiHit): Int = when {
     }
 }
 
-/** 空态提示（居中灰字，还原原版"请在上方搜索栏中输入搜索内容"）。 */
+/** 空态提示（居中灰字，还原原版"请在上方搜索栏中输入搜索内容"）。
+ *
+ * alpha30：预留右下角筛选钮区（∞ 56dp + 漏斗 44dp 错落叠放）——
+ * 旧版垂直 120dp 居中时长文案右端会被 ∞ 钮压住（模拟器截图实证），
+ * 收窄水平范围 + 下探底部留白，让文案完整落在无遮挡区。
+ */
 @Composable
 fun EmptyHint(text: String) {
-    Box(Modifier.fillMaxWidth().padding(vertical = 120.dp), contentAlignment = Alignment.Center) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 24.dp, end = 88.dp, top = 72.dp, bottom = 176.dp),
+        contentAlignment = Alignment.Center,
+    ) {
         Text(
             text = text,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
     }
 }

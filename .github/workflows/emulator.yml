@@ -196,8 +196,61 @@ jobs:
           if adb logcat -d | grep -q "E AndroidRuntime.*$PKG"; then
             echo "logcat 检出本应用 FATAL EXCEPTION"; exit 1
           fi
+
+          # uiautomator 语义树精确点按：在当前屏幕找含指定文本的节点并点其中心。
+          # 旧版按屏幕比例点坐标赌位置，alpha29 实证把"设置页"截成了主界面
+          # —— UI 断言必须落在真实控件上，不落在猜测的百分比上。
+          tap_text() {
+            local label="$1" bounds
+            for i in 1 2 3; do
+              adb shell uiautomator dump /sdcard/uidump.xml > /dev/null 2>&1 || true
+              adb pull /sdcard/uidump.xml /tmp/uidump.xml > /dev/null 2>&1 || true
+              bounds=$(python3 - "$label" <<'PYEOF'
+import re, sys
+label = sys.argv[1]
+try:
+    xml = open('/tmp/uidump.xml', encoding='utf-8').read()
+except OSError:
+    xml = ''
+for m in re.finditer(r'text="([^"]*)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml):
+    if label in m.group(1):
+        print((int(m.group(2)) + int(m.group(4))) // 2,
+              (int(m.group(3)) + int(m.group(5))) // 2)
+        break
+PYEOF
+)
+              if [ -n "$bounds" ]; then
+                echo "tap_text '$label' -> $bounds"
+                adb shell input tap $bounds
+                return 0
+              fi
+              sleep 2
+            done
+            echo "未找到文本节点: $label"
+            return 1
+          }
+
+          # ① 主界面（搜索页默认态）
+          adb exec-out screencap -p > anything-emulator-home.png
+          ls -lh anything-emulator-home.png
+
+          # ② 设置页 · Material Design 3（底栏「设置」tab，中心约 77%/96%）
+          adb shell input tap $((W*77/100)) $((H*96/100))
+          sleep 3
           adb exec-out screencap -p > anything-emulator-settings.png
           ls -lh anything-emulator-settings.png
+
+          # ③ 设置页 · Miuix（设计风格 → Miuix · HyperOS 风格；点失败只告警不阻塞）
+          if tap_text "设计风格"; then
+            sleep 2
+            tap_text "Miuix" || true
+            sleep 4
+            adb exec-out screencap -p > anything-emulator-settings-miuix.png
+            ls -lh anything-emulator-settings-miuix.png
+          else
+            echo "警告：未能导航到设计风格行，跳过 Miuix 截图（人工复核回退）"
+          fi
+
           # 卸干净冒烟安装：UTP 重装时避免与 adb 直装包做签名比对
           # （INSTALL_FAILED_UPDATE_INCOMPATIBLE，四跑实证），让 UTP 全新装
           adb uninstall "$PKG" || true
@@ -249,6 +302,13 @@ jobs:
         with:
           archive: false
           path: anything-emulator-settings.png
+
+      - name: 上传设置页 Miuix 截图（直传）
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: anything-emulator-settings-miuix.png
 
       - name: 上传 debug 对照截图（直传）
         if: always()

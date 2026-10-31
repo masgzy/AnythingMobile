@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -82,8 +83,11 @@ import com.masgzy.anything.ui.theme.PaletteStyle
 import com.masgzy.anything.ui.theme.uiPalette
 
 /**
- * 设置页 —— NPatch 分组连块样式：分组小标题 + 圆角大卡片，
- * 卡片内多个设置项连排（项与项之间细分割线，对齐 NPatch/MIUI 设置观感）。
+ * 设置页 —— 双风格分派（alpha30 按 ImageToolbox/KernelSU 的 MD3 语言重排）：
+ *  - MD3：大标题折叠顶栏 + 每项独立 16dp 圆角卡（项与项 4dp 间距，
+ *    无分割线，ImageToolbox 设置页同款语言）；
+ *  - Miuix：HyperOS 分组连块卡（20dp 大圆角 + 卡内 0.5dp 细分割线，
+ *    NPatch/MIUI 设置同款）。
  *
  * 作为底栏 tab 页无返回键（alpha19）；外观面板：主题模式三态、动态取色（Monet）、
  * 配色方案（ImageToolbox 式角色化调色板）、AMOLED 纯黑、底栏形态；
@@ -128,15 +132,20 @@ fun SettingsScreen(
     }
     val sortLabel = if (settings.sortByName) "按名称" else "按时间"
 
+    val topBarScroll = rememberAppTopBarScrollBehavior()
     AppScaffold(
-        topBar = { AppTopBar("设置") },
+        topBar = { AppTopBar("设置", scrollBehavior = topBarScroll) },
+        scrollBehavior = topBarScroll,
     ) { padding ->
         Column(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp)
+                // MD3 = 16dp（KSU 分段卡同款边距）；Miuix = 12dp（NPatch 卡边距）
+                .padding(
+                    horizontal = if (LocalUiMode.current == DesignStyle.MIUIX) 12.dp else 16.dp,
+                )
                 .padding(top = 4.dp, bottom = 24.dp)
                 // 悬浮底栏实测占位（NPatch LocalFloatingBottomBarPadding 同款）：
                 // 尾部内容滚动到底时不被底栏遮挡
@@ -613,9 +622,10 @@ private fun styleLabel(style: PaletteStyle): String = when (style) {
     PaletteStyle.Content -> "内容"
 }
 
-// ---- 通用组件（NPatch 分组连块样式；Miuix 风格经 uiPalette 取 HyperOS 色板） ----
+// ---- 通用组件（双风格分派）：MD3 = ImageToolbox 独立圆角卡语言；----
+// ---- Miuix = HyperOS 分组连块（经 uiPalette 取 HyperOS 色板） ----
 
-/** 分组小标题（NPatch SmallTitle 观感：主色、字重、卡片上方呼吸感；
+/** 分组小标题（KSU Material：titleSmall 主色、与卡内容左对齐；
  *  Miuix 风格直接用 miuix SmallTitle，即 HyperOS 设置的分组标题）。 */
 @Composable
 private fun SectionHeader(text: String) {
@@ -628,55 +638,58 @@ private fun SectionHeader(text: String) {
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+        modifier = Modifier.padding(start = 16.dp, top = 2.dp),
     )
 }
 
 /**
- * 分组连块卡片：一张圆角卡内连排多个设置项，
- * 项与项之间由 [GroupDivider] 画分割线。
- * 圆角按设计风格派发：MD3 = 12dp（标准 M3 卡片圆角）；
- * Miuix = 20dp（HyperOS 大圆角连块，NPatch 同款）。
+ * 分组容器，按设计风格分派：
+ *  - Miuix：一张 20dp 大圆角卡内连排多个设置项，项间由 [GroupDivider] 分隔
+ *    （HyperOS/NPatch 分组连块观感）；
+ *  - MD3：容器只提供 4dp 间距，每个设置项由 [PreferenceItem] 自带独立
+ *    16dp 圆角卡 —— 项与项彼此分隔开（ImageToolbox 设置页同款，无分割线）。
  */
 @Composable
 private fun GroupCard(content: @Composable ColumnScope.() -> Unit) {
-    val p = uiPalette()
-    Surface(
-        shape = if (LocalUiMode.current == DesignStyle.MIUIX) {
-            RoundedCornerShape(20.dp)
-        } else {
-            RoundedCornerShape(12.dp)
-        },
-        color = p.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(content = content)
+    if (LocalUiMode.current == DesignStyle.MIUIX) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = uiPalette().surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(content = content)
+        }
+    } else {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            content = content,
+        )
     }
 }
 
-/** 连块内分割线，按设计风格派发：
- *  Miuix/HyperOS：0.5dp 超细线、缩进到文字列（NPatch/MIUI 设置同款）；
- *  MD3：1dp 标准分割线、左端与图标对齐（M3 卡内列表惯例）。 */
+/** 分组分隔，按设计风格分派：
+ *  MD3：无分割线 —— 独立圆角卡之间的 4dp 间距即分隔（ImageToolbox 同款）；
+ *  Miuix/HyperOS：0.5dp 超细线、缩进到文字列（NPatch/MIUI 设置同款）。 */
 @Composable
 private fun GroupDivider() {
-    if (LocalUiMode.current == DesignStyle.MIUIX) {
-        HorizontalDivider(
-            modifier = Modifier.padding(start = 68.dp),
-            thickness = 0.5.dp,
-            color = uiPalette().outlineVariant.copy(alpha = 0.5f),
-        )
-    } else {
-        HorizontalDivider(
-            modifier = Modifier.padding(start = 16.dp),
-            thickness = 1.dp,
-            color = uiPalette().outlineVariant.copy(alpha = 0.6f),
-        )
+    if (LocalUiMode.current != DesignStyle.MIUIX) {
+        return
     }
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 68.dp),
+        thickness = 0.5.dp,
+        color = uiPalette().outlineVariant.copy(alpha = 0.5f),
+    )
 }
 
 /**
  * 分组内单个设置项：左侧图标（可选自定义 leading），中间标题/副标题，右侧控件。
- * 与旧 [PreferenceCard] 的差别：无独立圆角容器与外边距，由 GroupCard 统一承载。
+ *  - Miuix：无独立容器（由 GroupCard 连块承载），主色圆角底盒 + 反色图标
+ *    （KSU Miuix 同款）；
+ *  - MD3：每项独立 16dp 圆角卡（surfaceContainerLow，ImageToolbox 同款），
+ *    图标用 onSurfaceVariant（M3 设置惯例 / KSU Material 同款），
+ *    点击整卡可点、涟漪被卡片圆角裁剪。
  */
 @Composable
 private fun PreferenceItem(
@@ -690,19 +703,10 @@ private fun PreferenceItem(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val p = uiPalette()
-    val clickMod = onClick?.let { o ->
-        Modifier.clickable(enabled = enabled) { o() }
-    } ?: Modifier
+    val miuix = LocalUiMode.current == DesignStyle.MIUIX
     val contentAlpha = if (enabled) 1f else 0.5f
 
-    Row(
-        modifier
-            .fillMaxWidth()
-            .height(IntrinsicSize.Min)
-            .then(clickMod)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    val rowContent: @Composable RowScope.() -> Unit = {
         Box(
             Modifier
                 .size(40.dp)
@@ -711,7 +715,7 @@ private fun PreferenceItem(
         ) {
             if (leading != null) {
                 leading()
-            } else if (LocalUiMode.current == DesignStyle.MIUIX) {
+            } else if (miuix) {
                 // HyperOS 设置观感：主色圆角底盒 + 反色图标（KSU Miuix 同款）
                 Box(
                     Modifier
@@ -728,10 +732,11 @@ private fun PreferenceItem(
                     )
                 }
             } else {
+                // MD3 设置惯例：onSurfaceVariant 裸图标（KSU Material 同款）
                 Icon(
                     icon,
                     contentDescription = null,
-                    tint = p.primary,
+                    tint = p.onSurfaceVariant,
                     modifier = Modifier.size(24.dp),
                 )
             }
@@ -753,6 +758,40 @@ private fun PreferenceItem(
             )
         }
         trailing?.invoke()
+    }
+
+    if (miuix) {
+        Row(
+            modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
+                .then(
+                    onClick?.let { o -> Modifier.clickable(enabled = enabled) { o() } } ?: Modifier
+                )
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            content = rowContent,
+        )
+    } else {
+        // 每项独立圆角卡：Surface(shape) 裁剪内容（含涟漪），clickable 在行上
+        // —— ImageToolbox container+clickable 同款；开关类行由行内 Switch 自行响应
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            modifier = modifier.fillMaxWidth(),
+        ) {
+            Row(
+                Modifier
+                    .height(IntrinsicSize.Min)
+                    .then(
+                        onClick?.let { o -> Modifier.clickable(enabled = enabled) { o() } }
+                            ?: Modifier
+                    )
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                content = rowContent,
+            )
+        }
     }
 }
 

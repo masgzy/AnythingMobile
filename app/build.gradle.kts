@@ -22,8 +22,8 @@ android {
         applicationId = "com.masgzy.anything"
         minSdk = 24
         targetSdk = 36
-        versionCode = 29
-        versionName = "1.0.0-alpha29"
+        versionCode = 30
+        versionName = "1.0.0-alpha30"
         // 仪器化测试跑在 Android 虚拟机上（.github/workflows/emulator.yml）
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 检查更新总开关：standard 渠道默认开；offline 渠道置 false 且

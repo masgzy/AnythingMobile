@@ -7,14 +7,23 @@ Rust 无 runtime；JNI 直连微秒级；索引期内存显著下降。
 ## 构建
 
 ```bash
-# 桌面测试（CI 同款：fmt + clippy 严格 + 121 用例）
+# 桌面测试（CI 同款：fmt + clippy 严格 + 123 用例）
 cargo test
+
+# 扫描链路基准（手动运行，不进 CI 门禁；规模可调 BENCH_FILES/BENCH_DOCS）
+cargo test --test bench_scan --release -- --ignored --nocapture
 
 # Android .so（需 NDK，输出到 app/src/main/jniLibs/）
 ./build-so.sh
 # 或指定输出目录（CI 冒烟防污染 app 打包）
 ./build-so.sh dist/
 ```
+
+基准参考（沙箱 SSD，12,000 文件 / 250 docx，绝对值随机器浮动，看相对占比）：
+纯遍历 21ms（4 workers）/ 全量建索引 178ms / 增量零变化 44ms /
+增量 50 变更 43ms / 引擎重启恢复 31ms / 搜索 0.5~4ms。
+增量零变化轮不落盘快照（对标原版"更新不写盘"，`zero_change_incremental_skips_snapshot_rewrite`
+回归钉住）。
 
 产物：`libanything.so`（arm64-v8a / armeabi-v7a / x86_64，16KB 页对齐）。
 实测体积：arm64 7.37MB（alpha20）→ 7.06MB（alpha25，APK 内不压缩存储直载）；

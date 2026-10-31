@@ -65,6 +65,7 @@ fun LogScreen(onBack: () -> Unit) {
         entries = if (filter < 0) all else all.filter { it.level >= filter }
     }
 
+    val topBarScroll = rememberAppTopBarScrollBehavior()
     AppScaffold(
         topBar = {
             AppTopBar(
@@ -74,6 +75,7 @@ fun LogScreen(onBack: () -> Unit) {
                         Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = "返回")
                     }
                 },
+                scrollBehavior = topBarScroll,
             ) {
                 IconButton(onClick = {
                     AppLogger.clear()
@@ -90,6 +92,7 @@ fun LogScreen(onBack: () -> Unit) {
                 }
             }
         },
+        scrollBehavior = topBarScroll,
     ) { padding ->
         Column(
             Modifier

@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SyntaxHelpScreen(onBack: () -> Unit) {
+    val topBarScroll = rememberAppTopBarScrollBehavior()
     AppScaffold(
         topBar = {
             AppTopBar(
@@ -49,8 +50,10 @@ fun SyntaxHelpScreen(onBack: () -> Unit) {
                         Icon(painterResource(R.drawable.ic_arrow_back), "返回")
                     }
                 },
+                scrollBehavior = topBarScroll,
             )
         },
+        scrollBehavior = topBarScroll,
     ) { padding ->
         Column(
             Modifier

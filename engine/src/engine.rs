@@ -388,9 +388,19 @@ impl EngineImpl {
         }
         self.scanning.store(false, Ordering::Release);
         self.invalidate_search_cache(); // 收尾清理后，旧结果一律失效
+        // 零变化增量轮跳过落盘（alpha30，对标原版"更新不写盘"语义）：
+        // 无新增/更新/删除/补解析且非首建时，快照与上一轮逐字节一致，
+        // 重写上万条目（导出+gzip+rename）是纯浪费的 flash 写入与功耗。
+        // full 模式与首建（含快照损坏后的静默重建）一律照存。
+        let zero_change = incremental
+            && !self.first_build.load(Ordering::Relaxed)
+            && self.added.load(Ordering::Relaxed) == 0
+            && self.updated.load(Ordering::Relaxed) == 0
+            && self.removed.load(Ordering::Relaxed) == 0
+            && self.docs_indexed.load(Ordering::Relaxed) == 0;
         // 先注册并启动异步落盘，再通知完成事件：保证宿主看到 OnFinished
         // 时落盘任务已在册（Go 同款顺序）。记录导出移入落盘线程（alpha26）。
-        if !cancelled && !self.data_dir.is_empty() {
+        if !cancelled && !self.data_dir.is_empty() && !zero_change {
             let engine = Arc::clone(self);
             crate::persist::spawn_save_lazy(
                 Arc::clone(&self.save_gate),
@@ -1213,6 +1223,46 @@ mod tests {
         let e = EngineImpl::new(1, "").unwrap();
         assert!(e.start_scan("{bad").is_err());
         assert!(e.start_scan(r#"{"roots":[]}"#).is_err());
+    }
+
+    /// 零变化增量轮跳过快照落盘（alpha30，对标原版"更新不写盘"）：
+    /// 字节级比对 index.snap —— 无变更轮不重写，有变更轮恢复落盘。
+    #[test]
+    fn zero_change_incremental_skips_snapshot_rewrite() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("tree");
+        let data = tmp.path().join("data");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.txt"), b"x").unwrap();
+
+        let e = EngineImpl::new(2, data.to_str().unwrap()).unwrap();
+        // 数组格式 = full：首建必须落盘
+        e.start_scan(&format!(r#"["{}"]"#, root.display())).unwrap();
+        assert!(!wait_idle(&e));
+        let snap = data.join("index.snap");
+        assert!(snap.exists(), "首建必须落盘");
+        let before = std::fs::read(&snap).unwrap();
+
+        // 零变化增量：不重写快照（字节级一致）
+        e.start_scan(&format!(
+            r#"{{"roots":["{}"],"mode":"incremental"}}"#,
+            root.display()
+        ))
+        .unwrap();
+        assert!(!wait_idle(&e));
+        let after = std::fs::read(&snap).unwrap();
+        assert_eq!(before, after, "零变化增量轮不应重写快照");
+
+        // 有变更的增量轮：恢复落盘
+        std::fs::write(root.join("a.txt"), b"changed").unwrap();
+        e.start_scan(&format!(
+            r#"{{"roots":["{}"],"mode":"incremental"}}"#,
+            root.display()
+        ))
+        .unwrap();
+        assert!(!wait_idle(&e));
+        let changed = std::fs::read(&snap).unwrap();
+        assert_ne!(before, changed, "有变更的增量轮必须落盘");
     }
 
     #[test]
