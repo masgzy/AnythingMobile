@@ -96,8 +96,11 @@ fun AnythingTheme(
                 keyColor = keyColor,
                 isDark = dark,
                 paletteStyle = miuixStyle,
-                // Spec2021 与 material-kolor 默认规格一致，两风格色相不漂移
-                colorSpec = ThemeColorSpec.Spec2021,
+                // Spec2025 = miuix/HyperOS 2 最新取色规格：让 Miuix 风格呈现
+                // 真正的 HyperOS 色感（alpha28 曾用 Spec2021 与 MD3 规格对齐，
+                // 结果两风格色板几乎无差别，alpha29 按用户反馈改回 HyperOS
+                // 原生规格 —— 设计风格切换要有可感知的观感差异）
+                colorSpec = ThemeColorSpec.Spec2025,
             )
         }
         MiuixTheme(controller = controller) {

@@ -633,14 +633,20 @@ private fun SectionHeader(text: String) {
 }
 
 /**
- * 分组连块卡片（NPatch Card 同构）：一张圆角卡内连排多个设置项，
- * 项与项之间由 [GroupDivider] 画缩进细线 —— 替代旧版每项一张独立卡片的散排。
+ * 分组连块卡片：一张圆角卡内连排多个设置项，
+ * 项与项之间由 [GroupDivider] 画分割线。
+ * 圆角按设计风格派发：MD3 = 12dp（标准 M3 卡片圆角）；
+ * Miuix = 20dp（HyperOS 大圆角连块，NPatch 同款）。
  */
 @Composable
 private fun GroupCard(content: @Composable ColumnScope.() -> Unit) {
     val p = uiPalette()
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = if (LocalUiMode.current == DesignStyle.MIUIX) {
+            RoundedCornerShape(20.dp)
+        } else {
+            RoundedCornerShape(12.dp)
+        },
         color = p.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -648,14 +654,24 @@ private fun GroupCard(content: @Composable ColumnScope.() -> Unit) {
     }
 }
 
-/** 连块内分割线：左端缩进到文字列（图标右侧），NPatch/MIUI 设置同款。 */
+/** 连块内分割线，按设计风格派发：
+ *  Miuix/HyperOS：0.5dp 超细线、缩进到文字列（NPatch/MIUI 设置同款）；
+ *  MD3：1dp 标准分割线、左端与图标对齐（M3 卡内列表惯例）。 */
 @Composable
 private fun GroupDivider() {
-    HorizontalDivider(
-        modifier = Modifier.padding(start = 68.dp),
-        thickness = 0.5.dp,
-        color = uiPalette().outlineVariant.copy(alpha = 0.5f),
-    )
+    if (LocalUiMode.current == DesignStyle.MIUIX) {
+        HorizontalDivider(
+            modifier = Modifier.padding(start = 68.dp),
+            thickness = 0.5.dp,
+            color = uiPalette().outlineVariant.copy(alpha = 0.5f),
+        )
+    } else {
+        HorizontalDivider(
+            modifier = Modifier.padding(start = 16.dp),
+            thickness = 1.dp,
+            color = uiPalette().outlineVariant.copy(alpha = 0.6f),
+        )
+    }
 }
 
 /**
@@ -695,6 +711,22 @@ private fun PreferenceItem(
         ) {
             if (leading != null) {
                 leading()
+            } else if (LocalUiMode.current == DesignStyle.MIUIX) {
+                // HyperOS 设置观感：主色圆角底盒 + 反色图标（KSU Miuix 同款）
+                Box(
+                    Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(p.primary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        tint = p.onPrimary,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
             } else {
                 Icon(
                     icon,

@@ -22,8 +22,8 @@ android {
         applicationId = "com.masgzy.anything"
         minSdk = 24
         targetSdk = 36
-        versionCode = 28
-        versionName = "1.0.0-alpha28"
+        versionCode = 29
+        versionName = "1.0.0-alpha29"
         // 仪器化测试跑在 Android 虚拟机上（.github/workflows/emulator.yml）
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 检查更新总开关：standard 渠道默认开；offline 渠道置 false 且
@@ -165,4 +165,17 @@ dependencies {
     // 接入官方 API 一套即可同时被 Shizuku 与 Stellar 管理器支持。
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+}
+
+// —— alpha29 回归修复：material3 版本钉回 BOM ——
+// miuix-ui 0.9.4 的传递依赖（JB material3-window-size-class 1.12.0-alpha03）
+// 会把 androidx.compose.material3 从 BOM 锁定的 1.4.0 静默仲裁到
+// 1.5.0-alpha22（alpha 线）；alpha28 实测该 alpha 版在 release 包引发
+// 图标渲染回归（应用内图标全部空白）。经 AAR 字节码核对，miuix-ui
+// 零引用 material3 类，强制钉回 BOM 版本零风险 —— 此后 material3
+// 版本完全由 BOM 决定，任何第三方传递升级都被此挡下。
+configurations.all {
+    resolutionStrategy {
+        force("androidx.compose.material3:material3:1.4.0")
+    }
 }
