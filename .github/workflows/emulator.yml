@@ -225,6 +225,14 @@ jobs:
       - name: 仪器化测试（connectedStandardDebugAndroidTest）
         run: ./gradlew :app:connectedStandardDebugAndroidTest --no-daemon
 
+      # 图标空白诊断（IconDiagTest 的像素矩阵打进 logcat，此处收集）
+      - name: 收集图标诊断矩阵
+        if: always()
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          timeout 30 adb logcat -d -s IconDiag > icon-diag.txt || true
+          cat icon-diag.txt
+
       # ---------- 产物 ----------
 
       # v7 的 archive: false 仅支持单文件，两张截图分两个 step 直传
@@ -248,6 +256,13 @@ jobs:
         with:
           archive: false
           path: anything-emulator-debug.png
+
+      - name: 上传图标诊断矩阵（直传）
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: icon-diag.txt
 
       - name: 失败时收集现场
         if: failure()

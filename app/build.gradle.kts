@@ -131,6 +131,8 @@ dependencies {
     androidTestImplementation("androidx.test:core-ktx:1.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
+    // IconDiagTest：Compose UI 诊断网格 + captureToImage 像素统计
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
 
     // Compose（BOM 2026.08.00：ui/foundation 1.12.0、material3 1.4.0；
     // 图标已迁 Material Symbols drawable（alpha25），不再依赖 material-icons-*）
