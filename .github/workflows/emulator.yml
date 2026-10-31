@@ -198,6 +198,12 @@ jobs:
           fi
           adb exec-out screencap -p > anything-emulator-home.png
           ls -lh anything-emulator-home.png
+          # 切到设置 tab（底栏第三项，中心约 83% / 93%）：验证 MD3 还原
+          # 观感（12dp 分组卡 + 标准分割线 + 裸主色图标）
+          adb shell input tap $((W*83/100)) $((H*93/100))
+          sleep 4
+          adb exec-out screencap -p > anything-emulator-settings.png
+          ls -lh anything-emulator-settings.png
           # 卸干净冒烟安装：UTP 重装时避免与 adb 直装包做签名比对
           # （INSTALL_FAILED_UPDATE_INCOMPATIBLE，四跑实证），让 UTP 全新装
           adb uninstall "$PKG" || true
@@ -216,7 +222,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: anything-emulator-home.png
+          path: |
+            anything-emulator-home.png
+            anything-emulator-settings.png
 
       - name: 失败时收集现场
         if: failure()
