@@ -8,16 +8,21 @@
 
 ## [1.0.0-alpha29] 2026-10-31
 
-### 图标空白回归修复（重要）
+### 图标空白根因修复（重要）
 
-- **修复 alpha28 release 包应用内图标全部空白**：miuix-ui 的传递依赖
-  把 `androidx.compose.material3` 从 BOM 锁定的 1.4.0 静默仲裁到
-  1.5.0-alpha22（alpha 线），该 alpha 版在 R8 下引发图标渲染回归。
-  现已强制钉回 1.4.0（经 AAR 字节码核对 miuix-ui 零引用 material3，
-  钉住零风险），此后 material3 版本完全由 BOM 决定。
-- CI 模拟器冒烟升级为安装 **release 包**（R8 + 正式签名）——
-  此类 release-only 回归 debug 包永远看不出来，并自动跳过欢迎页
-  截图主界面。
+- **修复全部应用内图标空白**：alpha25 图标迁移时直接照抄了 Google
+  Material Symbols 的 SVG pathData，未做坐标变换 —— 其 viewBox 是
+  「0 -960 960 960」，Android vector 却写死 24×24 视口，绝对坐标
+  (60~880, -840~-60) 全部画在视口之外，**自 alpha25 起图标从未真正
+  渲染过**。现已按状态机把 56 枚图标 pathData 变换到 24 视口
+  （x/40、y/40+24），仪器化像素矩阵实证全部恢复显示。
+- 新增 **IconDiagTest 回归门禁**：受控渲染网格逐格像素断言
+  （图标空白即测试红），此类"看不见的回归"从此必被 CI 拦下。
+- 防御性修复：miuix-ui 传递依赖会把 `androidx.compose.material3`
+  从 BOM 锁定的 1.4.0 静默仲裁到 1.5.0-alpha22（alpha 线），现已
+  强制钉回（miuix-ui 字节码零引用 material3，钉住零风险）。
+- CI 模拟器冒烟升级：改装 **release 包**（R8 + 正式签名）+ 自动
+  跳过欢迎页截图主界面/设置页 + debug 对照截图。
 
 ### 设计风格差异化（反馈修复）
 
