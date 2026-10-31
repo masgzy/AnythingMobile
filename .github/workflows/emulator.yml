@@ -197,31 +197,19 @@ jobs:
             echo "logcat 检出本应用 FATAL EXCEPTION"; exit 1
           fi
 
-          # uiautomator 语义树精确点按：在当前屏幕找含指定文本的节点并点其中心。
+          # uiautomator 语义树精确点按：在当前屏幕找 text 精确等于指定文案
+          # 的节点并点其中心（perl 非贪婪限本节点，防跨节点抓错 bounds）。
           # 旧版按屏幕比例点坐标赌位置，alpha29 实证把"设置页"截成了主界面
           # —— UI 断言必须落在真实控件上，不落在猜测的百分比上。
           tap_text() {
-            local label="$1" bounds
+            local label="$1" out
             for i in 1 2 3; do
               adb shell uiautomator dump /sdcard/uidump.xml > /dev/null 2>&1 || true
               adb pull /sdcard/uidump.xml /tmp/uidump.xml > /dev/null 2>&1 || true
-              bounds=$(python3 - "$label" <<'PYEOF'
-import re, sys
-label = sys.argv[1]
-try:
-    xml = open('/tmp/uidump.xml', encoding='utf-8').read()
-except OSError:
-    xml = ''
-for m in re.finditer(r'text="([^"]*)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml):
-    if label in m.group(1):
-        print((int(m.group(2)) + int(m.group(4))) // 2,
-              (int(m.group(3)) + int(m.group(5))) // 2)
-        break
-PYEOF
-)
-              if [ -n "$bounds" ]; then
-                echo "tap_text '$label' -> $bounds"
-                adb shell input tap $bounds
+              out=$(perl -ne "if (/text=\"\Q$label\E\"[^>]*?bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"/) { print(int((\$1+\$3)/2), ' ', int((\$2+\$4)/2)); exit 0; }" /tmp/uidump.xml 2>/dev/null)
+              if [ -n "$out" ]; then
+                echo "tap_text '$label' -> $out"
+                adb shell input tap $out
                 return 0
               fi
               sleep 2
@@ -240,10 +228,11 @@ PYEOF
           adb exec-out screencap -p > anything-emulator-settings.png
           ls -lh anything-emulator-settings.png
 
-          # ③ 设置页 · Miuix（设计风格 → Miuix · HyperOS 风格；点失败只告警不阻塞）
+          # ③ 设置页 · Miuix（设计风格 → 弹窗选项「Miuix · HyperOS 风格」；
+          #    精确匹配防命中行副标题的后缀长文案；点失败只告警不阻塞）
           if tap_text "设计风格"; then
             sleep 2
-            tap_text "Miuix" || true
+            tap_text "Miuix · HyperOS 风格" || true
             sleep 4
             adb exec-out screencap -p > anything-emulator-settings-miuix.png
             ls -lh anything-emulator-settings-miuix.png
