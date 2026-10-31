@@ -45,12 +45,10 @@ class IconDiagTest {
     private val cases = listOf(
         "design_style_hand" to R.drawable.ic_design_style,
         "brightness_6_gen" to R.drawable.ic_brightness_6,
-        "check_circle_gen" to R.drawable.ic_check_circle,
-        "search_gen" to R.drawable.ic_search,
-        "add_gen" to R.drawable.ic_add,
-        "folder_gen" to R.drawable.ic_folder,
-        "settings_gen" to R.drawable.ic_settings,
-        "close_gen" to R.drawable.ic_close,
+        "v2_nocomment" to R.drawable.ic_diag_v2_nocomment,
+        "v3_genfile_handpd" to R.drawable.ic_diag_v3_genfile_handpd,
+        "v4_handfile_genpd" to R.drawable.ic_diag_v4_handfile_genpd,
+        "v5_spaces" to R.drawable.ic_diag_v5_spaces,
     )
 
     @Test
@@ -63,6 +61,16 @@ class IconDiagTest {
                     .padding(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // framework VectorDrawable 渲染对照（Android 原生 ImageView）
+                androidx.compose.ui.viewinterop.AndroidView(
+                    factory = { ctx ->
+                        android.widget.ImageView(ctx).apply {
+                            setImageResource(R.drawable.ic_brightness_6)
+                            setColorFilter(0xFFFF0000.toInt())
+                        }
+                    },
+                    modifier = Modifier.size(64.dp),
+                )
                 cases.chunked(4).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         row.forEach { (name, res) ->
