@@ -177,9 +177,5 @@ dependencies {
 configurations.all {
     resolutionStrategy {
         force("androidx.compose.material3:material3:1.4.0")
-        // 金丝雀②：miuix-squircle 把 graphics-shapes 从 Compose BOM 期望的
-        // 1.0.1 仲裁到 1.1.0，观察是否参与图标渲染回归（若金丝雀①通过
-        // 即小数整数化单独生效，则本行与图标无关，保留与否视结论定）
-        force("androidx.graphics:graphics-shapes:1.0.1")
     }
 }
