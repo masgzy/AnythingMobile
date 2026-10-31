@@ -23,3 +23,18 @@
 
 # kotlinx-coroutines 可选传递依赖不在类路径，静默警告
 -dontwarn org.reactivestreams.**
+
+# —— alpha29：Compose vector 解析链路防优化（图标空白回归修复）——
+# 实证：alpha28 起 release 包里「migrate_icons.py 生成」的 Material Symbols
+# vector 全部渲染空白（手写 ic_design_style 同链路正常，JVM 下原始
+# PathParser 解析全部通过，资源层字节级完好）—— 指向 R8 在依赖树变化
+# （miuix-ui 引入）后对 PathParser/FastFloatParser/PathBuilder 状态机
+# 的优化破坏（horizontal class merging 经典 bug 模式：小工具类被横向
+# 合并后解析行为改变）。keep 全链路，每类仅几百字节，体积代价可忽略。
+-keep class androidx.compose.ui.graphics.vector.PathParser { *; }
+-keep class androidx.compose.ui.graphics.vector.PathBuilder { *; }
+-keep class androidx.compose.ui.graphics.vector.FastFloatParserKt { *; }
+-keep class androidx.compose.ui.graphics.vector.PathNode { *; }
+-keep class androidx.compose.ui.graphics.vector.PathNode$* { *; }
+-keep class androidx.compose.ui.graphics.VectorComposeKt { *; }
+-keep class androidx.compose.ui.res.VectorResourcesKt { *; }
