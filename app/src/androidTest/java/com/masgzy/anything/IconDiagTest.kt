@@ -116,6 +116,17 @@ class IconDiagTest {
             }
         }
         Log.i("IconDiag", "MATRIX DONE density=$density bmp=${bmp.width}x${bmp.height}")
+        // 回归门禁：每格必须真实渲染出图标（viewport 修复前迁移产物全为 0）
+        cases.chunked(4).forEachIndexed { r, rowCases ->
+            rowCases.forEachIndexed { c, (name, _) ->
+                val x0 = pad + c * (cell + gap)
+                val y0 = pad + r * (cell + gap)
+                val px = countColored(bmp, x0, y0, cell)
+                if (px < 50) throw AssertionError(
+                    "$name 渲染空白（coloredPx=$px < 50）—— 检查 drawable 坐标域/viewport",
+                )
+            }
+        }
     }
 
     /** 统计格子内非背景（非白/非浅灰）的像素数。 */

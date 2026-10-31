@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- alpha29：资源收缩器防误删清单。
-     实证（alpha28 线上包字节级检查）：ic_tonality 被 shrinker 误删
-     （Amoled 行图标空白）；R8 full mode 把 R 常量内联后，收缩器的
-     可达性分析对部分 vector 失明 —— 且误删集合随依赖树变化漂移
-     （alpha27 不误删，alpha28 误删）。图标本体每枚仅 1-3KB，56 枚
-     全量保留的体积代价可忽略，换确定性渲染。 -->
-<resources xmlns:tools="http://schemas.android.com/tools"
-    tools:keep="@ic_add,@ic_all_inclusive,@ic_arrow_back,@ic_article,@ic_brightness_6,@ic_bug_report,@ic_check,@ic_check_circle,@ic_close,@ic_colorize,@ic_contrast,@ic_delete,@ic_delete_sweep,@ic_description,@ic_design_style,@ic_done_all,@ic_edit,@ic_expand_less,@ic_expand_more,@ic_filter_list,@ic_folder,@ic_folder_off,@ic_folder_special,@ic_help,@ic_help_outline,@ic_image,@ic_info,@ic_insert_drive_file,@ic_invert_colors,@ic_key,@ic_label,@ic_launcher_foreground,@ic_lens_blur,@ic_manage_search,@ic_music_note,@ic_open_in_new,@ic_palette,@ic_restart_alt,@ic_schedule,@ic_search,@ic_settings,@ic_share,@ic_slideshow,@ic_sort_by_alpha,@ic_space_dashboard,@ic_swap_horiz,@ic_sync,@ic_system_update_alt,@ic_table_chart,@ic_terminal,@ic_tile_search,@ic_tonality,@ic_travel_explore,@ic_video_library,@ic_wallpaper,@ic_wb_twilight" />
