@@ -76,22 +76,23 @@ fun LogScreen(onBack: () -> Unit) {
                         Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = "返回")
                     }
                 },
+                actions = {
+                    IconButton(onClick = {
+                        AppLogger.clear()
+                        entries = emptyList()
+                    }) {
+                        Icon(painterResource(R.drawable.ic_delete), contentDescription = "清空日志")
+                    }
+                    IconButton(onClick = {
+                        val f = AppLogger.export(context)
+                        AppLogger.pruneExports(context)
+                        if (f != null) AppLogger.share(context, f)
+                    }) {
+                        Icon(painterResource(R.drawable.ic_share), contentDescription = "分享日志")
+                    }
+                },
                 scrollBehavior = topBarScroll,
-            ) {
-                IconButton(onClick = {
-                    AppLogger.clear()
-                    entries = emptyList()
-                }) {
-                    Icon(painterResource(R.drawable.ic_delete), contentDescription = "清空日志")
-                }
-                IconButton(onClick = {
-                    val f = AppLogger.export(context)
-                    AppLogger.pruneExports(context)
-                    if (f != null) AppLogger.share(context, f)
-                }) {
-                    Icon(painterResource(R.drawable.ic_share), contentDescription = "分享日志")
-                }
-            }
+            )
         },
         scrollBehavior = topBarScroll,
     ) { padding ->
