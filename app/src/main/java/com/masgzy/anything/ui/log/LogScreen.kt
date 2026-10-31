@@ -42,6 +42,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.masgzy.anything.ui.AppScaffold
+import com.masgzy.anything.ui.rememberAppTopBarScrollBehavior
 import com.masgzy.anything.ui.AppTopBar
 
 /**
